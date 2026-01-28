@@ -1,13 +1,12 @@
 "use client"
 
 import React from "react"
+import StatueModel from "../model/blackhole"
 
 export default function HeroLanding(){
     return(
-        <div className=" realtive w-screen h-screen overflow-hidden">
-            <div id="bg-landing" className="absolute inset-0 bg-gradient-to-br from-[#021b2d] via-[#041f30] to-black"/>
-            <div id="fog" className="absolute inset-0 bg-[radial-gradient(circle_at_50%_70%,rgba(0,255,255,0.12),transparent_60%)] blur-3xl" />
-            <div className="absolute right-[20%] top-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full border-[6px] border-cyan-400 shadow-[0_0_40px_#22d3ee,0_0_80px_rgba(34,211,238,.8),0_0_160px_rgba(34,211,238,.6)]" />
+        <div className=" realtive w-screen bg-black h-screen overflow-hidden">
+            <StatueModel/>
 
         </div>
     )
