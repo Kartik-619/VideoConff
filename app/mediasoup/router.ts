@@ -3,8 +3,6 @@ import type { RtpCodecCapability } from "mediasoup/types";
 
 import { createWorker } from './worker';
 
-const worker=await createWorker();
-
 const mediaCodecs: RtpCodecCapability[] = [
     {
         kind: "audio",
@@ -34,6 +32,7 @@ const mediaCodecs: RtpCodecCapability[] = [
   
 
 //creating rooms
-const router=await worker.createRouter({mediaCodecs});
-
-export {router};
+export const createRouter = async () => {
+    const worker = await createWorker();
+    return await worker.createRouter({ mediaCodecs });
+  };
