@@ -1,11 +1,14 @@
-import * as mediasoup from 'mediasoup';
-import {router} from './router';
+import * as mediasoup from "mediasoup";
 
-
-
-const transport = await router.createWebRtcTransport({
+export const createTransport = async (
+  //the types for these router and webRTC server is inbuilt in it
+  router: mediasoup.types.Router,
+  webRtcServer: mediasoup.types.WebRtcServer
+) : Promise<mediasoup.types.WebRtcTransport>=> {
+  return await router.createWebRtcTransport({
     webRtcServer,
     enableUdp: true,
     enableTcp: true,
     preferUdp: true
   });
+};
