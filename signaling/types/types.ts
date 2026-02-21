@@ -2,7 +2,7 @@ import * as mediasoup from 'mediasoup'
 import type { WebSocket } from "ws";
 export type Peer = {
     socket: WebSocket;
-    transport?: Map<string,mediasoup.types.WebRtcTransport>;
+    transports?: Map<string,mediasoup.types.WebRtcTransport>;
     producers: Map<string, mediasoup.types.Producer>;
     consumers: Map<string, mediasoup.types.Consumer>;
   };
