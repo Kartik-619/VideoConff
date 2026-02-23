@@ -4,7 +4,11 @@ import { randomUUID } from "crypto";
 import {Peer,Room} from './types/types';
 import {createRouter} from '../app/mediasoup/router';
 import { createTransport } from "@/app/mediasoup/transport";
+import {createWebRTCServer} from '@/app/mediasoup/webrtc';
+
+const WebRTCServer= await createWebRTCServer();
 const wss = new WebSocketServer({ port: 8080 });
+
 
 console.log(" Signaling server running on ws://localhost:8080");
 
@@ -12,17 +16,16 @@ const rooms = new Map<string, Room>();
 
 
 wss.on("connection", (ws: WebSocket) => {
-  let roomId: string | null = null;
-  let peerId: string | null = null;
+  let roomId: string;
+  let peerId: string ;
 
   ws.on("message",async (message: WebSocket.RawData) => {
     const data = JSON.parse(message.toString());
 
     // ===== JOIN =====
     if (data.type === "join") {
-      const roomId = data.roomId;
+       roomId = data.roomId;
       
-      const socketId = crypto.randomUUID();
       peerId = randomUUID();
       (ws as any).id = peerId;
 
@@ -93,9 +96,9 @@ wss.on("connection", (ws: WebSocket) => {
       const peer = room?.peers.get(peerId!);
       if (!room || !peer) return;
     
-      const transport = await createTransport(room.router, webRtcServer);
+      const transport = await createTransport(room.router,WebRTCServer);
       if(!transport) return;
-      transport.set(transport.id, transport);
+      peer.transports?.set(transport.id, transport);
     
       ws.send(JSON.stringify({
         type: "transportCreated",
@@ -106,6 +109,28 @@ wss.on("connection", (ws: WebSocket) => {
           dtlsParameters: transport.dtlsParameters
         }
       }));
+    }
+
+    if(data.type==="producer"){
+      const { transportId, kind, rtpParameters } = data;
+
+      const room = rooms.get(roomId!);
+      const peer = room?.peers.get(peerId!);
+      if (!room || !peer) return;
+    
+      const transport = await peer.transports?.get(transportId);
+      if(!transport){
+          console.log("No transport Found");
+        return};
+
+      try{const producer=await transport.produce({
+        kind, rtpParameters
+      });
+        peer.producers.set(producer.id,producer);
+    }catch(e){
+        console.error("producer error", e);
+      }
+ 
     }
    
   });
