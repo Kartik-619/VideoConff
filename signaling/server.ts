@@ -5,6 +5,7 @@ import {Peer,Room} from './types/types';
 import {createRouter} from '../app/mediasoup/router';
 import { createTransport } from "@/app/mediasoup/transport";
 import {createWebRTCServer} from '@/app/mediasoup/webrtc';
+import { pipeline } from "stream";
 
 const WebRTCServer= await createWebRTCServer();
 const wss = new WebSocketServer({ port: 8080 });
@@ -127,12 +128,34 @@ wss.on("connection", (ws: WebSocket) => {
         kind, rtpParameters
       });
         peer.producers.set(producer.id,producer);
+       //pipeline is valid only when you're connecting different workers with different routers but at the moment we are just writing the room logic
+       //  const pipeline= await room.router.pipeToRouter({producerId:producer.id,router:room.router});
+
+       //notify the host and server
+       ws.send(JSON.stringify({
+          type:"produced",
+          data:{
+            producerId:producer.id
+          }})
+        );
+
+        //notify all the other peers about the consumer
+        room.peers.forEach((otherPeer,otherPeerId)=>{
+          if(otherPeerId!==peerId){
+            otherPeer.socket.send(JSON.stringify({
+              type:"producer",
+              data:{
+                producerId:producer.id
+              }
+            }));
+          }
+        });
+
+
     }catch(e){
         console.error("producer error", e);
       }
- 
-    }
-   
+    }  
   });
 
   ws.on("close", () => {
