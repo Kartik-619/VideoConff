@@ -5,7 +5,7 @@ import {Peer,Room} from './types/types';
 import {createRouter} from '../app/mediasoup/router';
 import { createTransport } from "@/app/mediasoup/transport";
 import {createWebRTCServer} from '@/app/mediasoup/webrtc';
-import { pipeline } from "stream";
+
 
 const WebRTCServer= await createWebRTCServer();
 const wss = new WebSocketServer({ port: 8080 });
@@ -156,6 +156,41 @@ wss.on("connection", (ws: WebSocket) => {
         console.error("producer error", e);
       }
     }  
+
+    //created the consumer
+    if(data.type==="consumer"){
+       const { producerId, kind,transportId ,rtpCapabilities } = data;
+       const room = rooms.get(roomId!);
+       const peer = room?.peers.get(peerId!);
+       if (!room || !peer) return;
+       const transport = await peer.transports?.get(transportId);
+       if(!transport){
+           console.log("No transport Found");
+         return};
+       if(!room.router.canConsume({producerId,rtpCapabilities})){
+        console.log("Router can consume no more");
+        return;
+       }
+      try{ 
+        const consumer=await transport.consume({
+          producerId,
+          rtpCapabilities,
+          paused:true
+       });
+       peer.consumers.set(consumer.id,consumer);
+
+      ws.send(JSON.stringify({
+        type: "consumerCreated",
+        data: {
+          id: consumer.id,
+          producerId,
+          kind: consumer.kind,
+          rtpParameters: consumer.rtpParameters
+        }}));
+      }catch(e){
+        console.error("The consumer error while signaling ",e);
+       }
+    }
   });
 
   ws.on("close", () => {
