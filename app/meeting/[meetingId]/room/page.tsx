@@ -18,28 +18,27 @@ import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 
 import { types as mediasoupTypes } from "mediasoup-client";
-import next from "next";
-
-let producer: mediasoupTypes.Producer;
-let rtpParameters: mediasoupTypes.RtpParameters;
 
 
-export default  function MeetingRoom () {
+
+
+export default function MeetingRoom() {
 
   const params = useParams();
   const meetingId = params.meetingId as string;
-
+  const sendTransportRef = useRef<mediasoupTypes.Transport | null>(null);
+  const deviceRef = useRef<mediasoupClient.Device | null>(null);
   const router = useRouter();
   const { data: session } = useSession();
-
+  //const sendTransport: mediasoupTypes.Transport;
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-
+  const recvTransportRef = useRef<types.Transport | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
   const [isHost, setIsHost] = useState(false);
-
+  const [RecvTransport,setupRecvTransport]=useState()
   //  Check if host
   useEffect(() => {
     const checkHost = async () => {
@@ -70,131 +69,150 @@ export default  function MeetingRoom () {
     return () => clearInterval(interval);
   }, [meetingId]);
 
-  
+
 
   //  WebRTC + WebSocket
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:8080");
     wsRef.current = ws;
-    const deviceRef =useRef<mediasoupClient.Device | null>(null);
-
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    });
-
-    pcRef.current = pc;
-
-    //receive video (remote)
-    pc.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-  // Send ICE safely
-    pc.onicecandidate = (event) => {
-      if (event.candidate && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: "ice",
-          roomId: meetingId,
-          payload: event.candidate
-        }));
-      }
-    };
-  
-      ws.onmessage=async (e)=>{
-        const data = JSON.parse(e.data);
-
-        if(data.type==="rtpCapabilities"){
-          const device:mediasoupTypes.Device=new mediasoupClient.Device();
-          try{
-         
-            await device.load({routerRtpCapabilities:data.data});
-
-           }catch(e){
-            console.warn('browser not supported ');
-           }
-           deviceRef.current=device;
-          } 
-
-    }
-    //function for camera access
-    async function getMedia() {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          width: 1280, height: 720, facingMode: "user" },
-        audio: true,
-      });
-
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-
-      stream.getTracks().forEach((track) => {
-        pc.addTrack(track, stream);
-      });
-    }
-      //message to join the meeting
-    ws.onopen = async () => {
+    let device: mediasoupTypes.Device;
+    let sendTransport: mediasoupTypes.Transport;
+    ws.onopen = () => {
       ws.send(JSON.stringify({
         type: "join",
-        roomId: meetingId
+        roomId: meetingId,
+        userId: session?.user?.id
       }));
-
-      await getMedia();
     };
 
-    ws.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
+    ws.onmessage = async (e) => {
+      const data = JSON.parse(e.data);
+      console.log("received the data ", e.data.type);
 
-      if (data.type === "create-offer") {
-        if (pc.signalingState !== "closed") {
-          
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-      
+      if (data.type === 'rtpCapabilities') {
+        try {
+          const device = new mediasoupClient.Device();
+          await device.load({ routerRtpCapabilities: data.data });
+          deviceRef.current = device;
+          console.log("device loaded successully");
           ws.send(JSON.stringify({
-            type: "offer",
-            roomId: meetingId,
-            payload: offer
+            type: "createTransport"
           }));
+          ws.send(JSON.stringify({
+            type: "createTransport"
+          }));
+
+          // Request second transport for receiving
+          setTimeout(() => {
+            ws.send(JSON.stringify({
+              type: "createTransport"
+            }));
+          }, 100);
+        } catch (e) {
+          console.warn("Browser not supported", e);
         }
       }
+      if (data.type === 'transportCreated') {
+        const transportData = data.data;
+        let transport;
+        if (!deviceRef.current) return;
+        if (!sendTransportRef.current) {
+         
+          transport =
+           deviceRef.current.createSendTransport(
+             transportData
+           );
+        
+          sendTransportRef.current = transport;
+        
+          setupSendTransport(transport);
+        
+        }
+        else {
+        
+          transport =
+           deviceRef.current.createRecvTransport(
+             transportData
+           );
+        
+          recvTransportRef.current = transport;
+        
+          setupRecvTransport(transport);
+        }
 
-      if (data.type === "offer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.payload));
 
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        ws.send(JSON.stringify({
-          type: "answer",
-          roomId: meetingId,
-          payload: answer
-        }));
-      }
-
-      if (data.type === "answer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.payload));
-      }
-
-      if (data.type === "ice-candidate") {
-        if (pc.remoteDescription) {
-          try{
-            await pc.addIceCandidate(new RTCIceCandidate(data.payload));
-
-          }catch(e){
-            console.log("Error while using ice candidates",e)
+        transport.on("connect", async ({ dtlsParameters }, callback, errback) => {
+          try {
+            await wsRef.current?.send(JSON.stringify({
+              type: "connectTransport",
+              transportId: transport.id,
+              dtlsParameters
+            })),
+              callback();
+          } catch (e) {
+            //its a medisoup type for error
+            errback(e as Error);
           }
-        }
+        });
+
+        transport.on("produce", async (parameters, callback, errback) => {
+          try {
+            // Signal parameters to the server side transport and retrieve the id of 
+            // the server side new producer.
+            const data = await wsRef.current?.send(JSON.stringify({
+              type: "producer",
+              transportId: transport.id,
+              kind: parameters.kind,
+              rtpParameters: parameters.rtpParameters,
+              appData: parameters.appData
+            }));
+
+            // Let's assume the server included the created producer id in the response
+            // data object.
+            const { id } = data;
+            // Tell the transport that parameters were transmitted and provide it with the
+            // server side producer's id.
+            callback({ id });
+
+
+          } catch (e) {
+            errback(e as Error);
+          }
+        });
+
+
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const videoTrack = stream.getVideoTracks()[0];
+        const producer = await transport.produce(
+          {
+            track: videoTrack,
+            encodings:
+              [
+                { maxBitrate: 100000 },
+                { maxBitrate: 300000 },
+                { maxBitrate: 900000 }
+              ],
+            codecOptions:
+            {
+              videoGoogleStartBitrate: 1000
+            }
+          });
       }
-    };
 
-    return () => {
-      pc.close();
-      ws.close();
-    };
+      if (data.type === "producer") {
 
+        wsRef.current?.send(JSON.stringify({
+          type: "consumer",
+          producerId: data.data.producerId,
+          transportId:
+            recvTransportRef.current?.id,
+          rtpCapabilities:
+            deviceRef.current?.rtpCapabilities
+        }));
+       }
+
+    }
+    //message to join the meeting
   }, [meetingId]);
 
   //  Leave
