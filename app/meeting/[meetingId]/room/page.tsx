@@ -38,7 +38,7 @@ export default function MeetingRoom() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
   const [isHost, setIsHost] = useState(false);
-  const [RecvTransport,setupRecvTransport]=useState()
+
   //  Check if host
   useEffect(() => {
     const checkHost = async () => {
@@ -77,6 +77,23 @@ export default function MeetingRoom() {
     wsRef.current = ws;
     let device: mediasoupTypes.Device;
     let sendTransport: mediasoupTypes.Transport;
+    async function startProducing(transport:mediasoupTypes.Transport){
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          video:true,
+          audio:true
+        });
+     
+      localVideoRef.current!.srcObject = stream;
+     
+      await transport.produce({
+        track: stream.getVideoTracks()[0]
+      });
+     
+      await transport.produce({
+        track: stream.getAudioTracks()[0]
+      });
+     }
     ws.onopen = () => {
       ws.send(JSON.stringify({
         type: "join",
@@ -98,16 +115,13 @@ export default function MeetingRoom() {
           ws.send(JSON.stringify({
             type: "createTransport"
           }));
+             // Request second transport for receiving
           ws.send(JSON.stringify({
             type: "createTransport"
           }));
 
-          // Request second transport for receiving
-          setTimeout(() => {
-            ws.send(JSON.stringify({
-              type: "createTransport"
-            }));
-          }, 100);
+       
+          
         } catch (e) {
           console.warn("Browser not supported", e);
         }
@@ -117,27 +131,46 @@ export default function MeetingRoom() {
         let transport;
         if (!deviceRef.current) return;
         if (!sendTransportRef.current) {
-         
+
           transport =
-           deviceRef.current.createSendTransport(
-             transportData
-           );
-        
+            deviceRef.current.createSendTransport(
+              transportData
+            );
+           
           sendTransportRef.current = transport;
-        
-          setupSendTransport(transport);
-        
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            const videoTrack = stream.getVideoTracks()[0];
+            const audioTrack = stream.getAudioTracks()[0];
+            const producer = await transport.produce(
+              {
+                //An audio or video track.
+                track: videoTrack,
+                encodings:
+                  [
+                    { maxBitrate: 100000 },
+                    { maxBitrate: 300000 },
+                    { maxBitrate: 900000 }
+                  ],
+                codecOptions:
+                {
+                  videoGoogleStartBitrate: 1000
+                }
+              });
+              await transport.produce({ track: audioTrack });
+
+          } catch (e) {
+            console.warn("Failed to get the media", e);
+          }
         }
         else {
-        
+
           transport =
-           deviceRef.current.createRecvTransport(
-             transportData
-           );
-        
+            deviceRef.current.createRecvTransport(
+              transportData
+            );
+
           recvTransportRef.current = transport;
-        
-          setupRecvTransport(transport);
         }
 
 
@@ -148,7 +181,11 @@ export default function MeetingRoom() {
               transportId: transport.id,
               dtlsParameters
             })),
+
               callback();
+              if(transport === sendTransportRef.current) {
+                startProducing(transport);
+              }
           } catch (e) {
             //its a medisoup type for error
             errback(e as Error);
@@ -169,10 +206,19 @@ export default function MeetingRoom() {
 
             // Let's assume the server included the created producer id in the response
             // data object.
-            const { id } = data;
-            // Tell the transport that parameters were transmitted and provide it with the
-            // server side producer's id.
-            callback({ id });
+            // Wait for the server response with producer ID
+            const messageHandler = (event: MessageEvent) => {
+              const response = JSON.parse(event.data);
+              if (response.type === "produced") {
+                // Tell the transport that parameters were transmitted and provide it with the
+                // server side producer's id.
+                wsRef.current?.removeEventListener("message", messageHandler);
+                callback({ id: response.data.producerId });
+              }
+            };
+            wsRef.current?.addEventListener("message", messageHandler);
+
+
 
 
           } catch (e) {
@@ -181,22 +227,6 @@ export default function MeetingRoom() {
         });
 
 
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const videoTrack = stream.getVideoTracks()[0];
-        const producer = await transport.produce(
-          {
-            track: videoTrack,
-            encodings:
-              [
-                { maxBitrate: 100000 },
-                { maxBitrate: 300000 },
-                { maxBitrate: 900000 }
-              ],
-            codecOptions:
-            {
-              videoGoogleStartBitrate: 1000
-            }
-          });
       }
 
       if (data.type === "producer") {
@@ -209,7 +239,35 @@ export default function MeetingRoom() {
           rtpCapabilities:
             deviceRef.current?.rtpCapabilities
         }));
-       }
+      }
+
+
+      if (data.type === 'consumerCreated') {
+        if (!recvTransportRef.current) return;
+        try {
+          //consuming the data using receiver ref
+          const consumer = await recvTransportRef.current.consume({
+            id: data.data.id,
+            producerId: data.data.producerId,
+            kind: data.data.kind,
+            rtpParameters: data.data.rtpParameters
+          });
+          if (data.data.kind === "video" && remoteVideoRef.current) {
+            const remoteStream = new MediaStream();
+            remoteStream.addTrack(consumer.track);
+            remoteVideoRef.current.srcObject = remoteStream;
+          }
+
+          // Resume the consumer (unpause)
+          ws.send(JSON.stringify({
+            type: "resumeConsumer",
+            consumerId: consumer.id
+          }));
+        } catch (e) {
+          console.error("consuming error", e);
+        }
+
+      }
 
     }
     //message to join the meeting
