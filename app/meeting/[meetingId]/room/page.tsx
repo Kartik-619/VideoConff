@@ -18,10 +18,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 
 import { types as mediasoupTypes } from "mediasoup-client";
-import next from "next";
 
-let producer: mediasoupTypes.Producer;
-let rtpParameters: mediasoupTypes.RtpParameters;
+
 
 
 export default function MeetingRoom() {
@@ -40,7 +38,7 @@ export default function MeetingRoom() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
   const [isHost, setIsHost] = useState(false);
-
+  const [RecvTransport,setupRecvTransport]=useState()
   //  Check if host
   useEffect(() => {
     const checkHost = async () => {
@@ -116,8 +114,73 @@ export default function MeetingRoom() {
       }
       if (data.type === 'transportCreated') {
         const transportData = data.data;
+        let transport;
         if (!deviceRef.current) return;
-        const transport= deviceRef.current?.createSendTransport(transportData);
+        if (!sendTransportRef.current) {
+         
+          transport =
+           deviceRef.current.createSendTransport(
+             transportData
+           );
+        
+          sendTransportRef.current = transport;
+        
+          setupSendTransport(transport);
+        
+        }
+        else {
+        
+          transport =
+           deviceRef.current.createRecvTransport(
+             transportData
+           );
+        
+          recvTransportRef.current = transport;
+        
+          setupRecvTransport(transport);
+        }
+
+
+        transport.on("connect", async ({ dtlsParameters }, callback, errback) => {
+          try {
+            await wsRef.current?.send(JSON.stringify({
+              type: "connectTransport",
+              transportId: transport.id,
+              dtlsParameters
+            })),
+              callback();
+          } catch (e) {
+            //its a medisoup type for error
+            errback(e as Error);
+          }
+        });
+
+        transport.on("produce", async (parameters, callback, errback) => {
+          try {
+            // Signal parameters to the server side transport and retrieve the id of 
+            // the server side new producer.
+            const data = await wsRef.current?.send(JSON.stringify({
+              type: "producer",
+              transportId: transport.id,
+              kind: parameters.kind,
+              rtpParameters: parameters.rtpParameters,
+              appData: parameters.appData
+            }));
+
+            // Let's assume the server included the created producer id in the response
+            // data object.
+            const { id } = data;
+            // Tell the transport that parameters were transmitted and provide it with the
+            // server side producer's id.
+            callback({ id });
+
+
+          } catch (e) {
+            errback(e as Error);
+          }
+        });
+
+
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         const videoTrack = stream.getVideoTracks()[0];
         const producer = await transport.produce(
@@ -134,17 +197,19 @@ export default function MeetingRoom() {
               videoGoogleStartBitrate: 1000
             }
           });
-        if (!sendTransportRef.current) {
-          sendTransportRef.current = transport;
-        } else if (!recvTransportRef.current) {
-          recvTransportRef.current = transport;
-        }
       }
 
-    if(data.type==="createTransport"){
-      if (!deviceRef.current) return;
+      if (data.type === "producer") {
 
-    }
+        wsRef.current?.send(JSON.stringify({
+          type: "consumer",
+          producerId: data.data.producerId,
+          transportId:
+            recvTransportRef.current?.id,
+          rtpCapabilities:
+            deviceRef.current?.rtpCapabilities
+        }));
+       }
 
     }
     //message to join the meeting
