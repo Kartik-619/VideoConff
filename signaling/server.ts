@@ -89,7 +89,8 @@ wss.on("connection", (ws: WebSocket) => {
       });
       ws.send(JSON.stringify({
         type: "transportConnected",
-
+        data:dtlsParameters
+        
       }));
     }
     if (data.type === "createTransport") {
