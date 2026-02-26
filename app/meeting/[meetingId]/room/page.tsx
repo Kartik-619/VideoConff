@@ -1,10 +1,31 @@
 'use client';
-
+import * as mediasoupClient from "mediasoup-client";
+import {
+  types,
+  version,
+  Device,
+  detectDevice,
+  detectDeviceAsync,
+  parseScalabilityMode,
+  ortc,
+  enhancedEvents,
+  FakeHandler,
+  testFakeParameters,
+  debug
+} from "mediasoup-client";
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 
-export default function MeetingRoom() {
+import { types as mediasoupTypes } from "mediasoup-client";
+import next from "next";
+
+let producer: mediasoupTypes.Producer;
+let rtpParameters: mediasoupTypes.RtpParameters;
+
+
+export default  function MeetingRoom () {
+
   const params = useParams();
   const meetingId = params.meetingId as string;
 
@@ -55,6 +76,7 @@ export default function MeetingRoom() {
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:8080");
     wsRef.current = ws;
+    const deviceRef =useRef<mediasoupClient.Device | null>(null);
 
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
@@ -79,7 +101,23 @@ export default function MeetingRoom() {
         }));
       }
     };
+  
+      ws.onmessage=async (e)=>{
+        const data = JSON.parse(e.data);
 
+        if(data.type==="rtpCapabilities"){
+          const device:mediasoupTypes.Device=new mediasoupClient.Device();
+          try{
+         
+            await device.load({routerRtpCapabilities:data.data});
+
+           }catch(e){
+            console.warn('browser not supported ');
+           }
+           deviceRef.current=device;
+          } 
+
+    }
     //function for camera access
     async function getMedia() {
       const stream = await navigator.mediaDevices.getUserMedia({
