@@ -77,6 +77,23 @@ export default function MeetingRoom() {
     wsRef.current = ws;
     let device: mediasoupTypes.Device;
     let sendTransport: mediasoupTypes.Transport;
+    async function startProducing(transport:mediasoupTypes.Transport){
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          video:true,
+          audio:true
+        });
+     
+      localVideoRef.current!.srcObject = stream;
+     
+      await transport.produce({
+        track: stream.getVideoTracks()[0]
+      });
+     
+      await transport.produce({
+        track: stream.getAudioTracks()[0]
+      });
+     }
     ws.onopen = () => {
       ws.send(JSON.stringify({
         type: "join",
@@ -98,16 +115,13 @@ export default function MeetingRoom() {
           ws.send(JSON.stringify({
             type: "createTransport"
           }));
+             // Request second transport for receiving
           ws.send(JSON.stringify({
             type: "createTransport"
           }));
 
-          // Request second transport for receiving
-          setTimeout(() => {
-            ws.send(JSON.stringify({
-              type: "createTransport"
-            }));
-          }, 100);
+       
+          
         } catch (e) {
           console.warn("Browser not supported", e);
         }
@@ -122,7 +136,7 @@ export default function MeetingRoom() {
             deviceRef.current.createSendTransport(
               transportData
             );
-
+           
           sendTransportRef.current = transport;
           try {
             const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -167,7 +181,11 @@ export default function MeetingRoom() {
               transportId: transport.id,
               dtlsParameters
             })),
+
               callback();
+              if(transport === sendTransportRef.current) {
+                startProducing(transport);
+              }
           } catch (e) {
             //its a medisoup type for error
             errback(e as Error);
@@ -250,8 +268,6 @@ export default function MeetingRoom() {
         }
 
       }
-
-
 
     }
     //message to join the meeting
