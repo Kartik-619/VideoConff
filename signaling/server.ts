@@ -6,7 +6,7 @@ import { createRouter } from '../app/mediasoup/router';
 import { createTransport } from "@/app/mediasoup/transport";
 import { createWebRTCServer } from '@/app/mediasoup/webrtc';
 
-
+async function startServer(){
 const WebRTCServer = await createWebRTCServer();
 const wss = new WebSocketServer({ port: 8080 });
 
@@ -247,3 +247,8 @@ wss.on("connection", (ws: WebSocket) => {
   });
 
 });
+}
+
+startServer().catch((err)=>{
+  console.error("Server failed to start ",err);
+})

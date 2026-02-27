@@ -36,6 +36,9 @@ export default function MeetingRoom() {
   const recvTransportRef = useRef<types.Transport | null>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+
+  const producedRef = useRef(false);
 
   const [isHost, setIsHost] = useState(false);
 
@@ -77,23 +80,31 @@ export default function MeetingRoom() {
     wsRef.current = ws;
     let device: mediasoupTypes.Device;
     let sendTransport: mediasoupTypes.Transport;
-    async function startProducing(transport:mediasoupTypes.Transport){
+
+
+    async function startProducing(transport: mediasoupTypes.Transport) {
+      if (producedRef.current) return;
+      producedRef.current = true;
+
       const stream =
         await navigator.mediaDevices.getUserMedia({
-          video:true,
-          audio:true
+          video: true,
+          audio: true
         });
-     
-      localVideoRef.current!.srcObject = stream;
-     
+
+      if (localVideoRef.current)
+        localVideoRef.current.srcObject = stream;
+
       await transport.produce({
         track: stream.getVideoTracks()[0]
       });
-     
+
       await transport.produce({
         track: stream.getAudioTracks()[0]
       });
-     }
+    }
+
+
     ws.onopen = () => {
       ws.send(JSON.stringify({
         type: "join",
@@ -115,13 +126,13 @@ export default function MeetingRoom() {
           ws.send(JSON.stringify({
             type: "createTransport"
           }));
-             // Request second transport for receiving
+          // Request second transport for receiving
           ws.send(JSON.stringify({
             type: "createTransport"
           }));
 
-       
-          
+
+
         } catch (e) {
           console.warn("Browser not supported", e);
         }
@@ -136,32 +147,9 @@ export default function MeetingRoom() {
             deviceRef.current.createSendTransport(
               transportData
             );
-           
-          sendTransportRef.current = transport;
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            const videoTrack = stream.getVideoTracks()[0];
-            const audioTrack = stream.getAudioTracks()[0];
-            const producer = await transport.produce(
-              {
-                //An audio or video track.
-                track: videoTrack,
-                encodings:
-                  [
-                    { maxBitrate: 100000 },
-                    { maxBitrate: 300000 },
-                    { maxBitrate: 900000 }
-                  ],
-                codecOptions:
-                {
-                  videoGoogleStartBitrate: 1000
-                }
-              });
-              await transport.produce({ track: audioTrack });
 
-          } catch (e) {
-            console.warn("Failed to get the media", e);
-          }
+          sendTransportRef.current = transport;
+
         }
         else {
 
@@ -183,9 +171,9 @@ export default function MeetingRoom() {
             })),
 
               callback();
-              if(transport === sendTransportRef.current) {
-                startProducing(transport);
-              }
+            if (transport === sendTransportRef.current) {
+              startProducing(transport);
+            }
           } catch (e) {
             //its a medisoup type for error
             errback(e as Error);
@@ -302,44 +290,65 @@ export default function MeetingRoom() {
   };
 
   return (
-    <div className="w-full h-screen bg-black relative">
+    <div className="w-full h-screen bg-black flex flex-col">
 
-      {/* Remote Video */}
+      {/* GRID */}
+
+      <div
+        className="flex-1 grid grid-cols-2 gap-2 p-2"
+      >
+
+        {
+          Array.from(remoteStreams.entries())
+            .map(([id, stream]) => (
+
+<video key={id} autoPlay playsInline ref={(video) => {if (video) video.srcObject = stream;}} className="  w-full h-full object-cover rounded-lg"/>
+
+            ))
+        }
+
+      </div>
+
+
+      {/* LOCAL */}
+
       <video
-        ref={remoteVideoRef}
-        autoPlay
-        playsInline
-        className="w-full h-full object-cover absolute inset-0"
+        ref={localVideoRef} autoPlay muted playsInline className=" w-48 h-36 absolute bottom-20 right-4 rounded-lg border border-white "
       />
 
-      {/* Local Video */}
-      <video
-        ref={localVideoRef}
-        autoPlay
-        muted
-        playsInline
-        className="w-48 h-36 object-cover absolute bottom-4 right-4 rounded-lg border border-white"
-      />
 
-      {/* Controls */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4">
-        {isHost ? (
-          <button
-            onClick={handleEnd}
-            className="bg-red-600 px-6 py-3 rounded-full text-white font-semibold"
-          >
-            End Meeting
-          </button>
-        ) : (
-          <button
-            onClick={handleLeave}
-            className="bg-red-500 px-6 py-3 rounded-full text-white font-semibold"
-          >
-            Leave
-          </button>
-        )}
+      {/* CONTROLS */}
+
+      <div
+        className="
+absolute
+bottom-6
+left-1/2
+-translate-x-1/2
+"
+      >
+
+        <button
+          onClick={cleanupAndExit}
+          className="
+bg-red-600
+px-6
+py-3
+rounded-full
+text-white
+"
+        >
+
+          {isHost
+            ? "End Meeting"
+            : "Leave"}
+
+        </button>
+
       </div>
 
     </div>
+
   );
+  
 }
