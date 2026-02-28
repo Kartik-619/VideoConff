@@ -65,35 +65,53 @@ wss.on("connection", (ws: WebSocket) => {
     }
 
     // ===== SIGNAL FORWARD =====
-    if (data.type === "connectTransport") {
-      const { transportId, dtlsParameters } = data;
-      if (!roomId || !peerId) return;
-      const room = rooms.get(roomId);
-      if (!room) return;
-      const peer = await room?.peers.get(peerId);
-      if (!peer || !peer.transports) {
-        console.error("Peer or transport missing");
-        return;
-      }
+    // In your server.ts, update the connectTransport handler:
+if (data.type === "connectTransport") {
+  const { transportId, dtlsParameters } = data;
+  console.log("🔌 Server received connectTransport for:", transportId);
+  console.log("🔌 Room ID:", roomId, "Peer ID:", peerId);
+  
+  if (!roomId || !peerId) {
+    console.error("❌ Missing roomId or peerId");
+    return;
+  }
+  
+  const room = rooms.get(roomId);
+  if (!room) {
+    console.error("❌ Room not found:", roomId);
+    return;
+  }
+  
+  const peer = room?.peers.get(peerId);
+  if (!peer || !peer.transports) {
+    console.error("❌ Peer or transport missing");
+    return;
+  }
 
-      const transport = peer?.transports.get(transportId);
-      if (!transport) {
-        console.log("Error in transport in signalling server");
-        return;
-      };
+  const transport = peer?.transports.get(transportId);
+  if (!transport) {
+    console.log("❌ Transport not found:", transportId);
+    return;
+  }
 
-      await transport.connect({
-        //- Indicates whether the endpoint acts as a DTLS client or server. In WebRTC, one side must take the "client" role and the other the "server" role to complete the handshake.
-        //A list of cryptographic fingerprints (hashes of the certificate) used to verify the identity of the remote peer
-        dtlsParameters: data.dtlsParameters
-      });
-      ws.send(JSON.stringify({
-        type: "transportConnected",
-        data:dtlsParameters
-        
-      }));
-    }
+  try {
+    console.log("🔌 Connecting transport:", transportId);
+    await transport.connect({ dtlsParameters });
+    
+    console.log("✅ Transport connected successfully:", transportId);
+    
+    ws.send(JSON.stringify({
+      type: "transportConnected",
+      transportId: transportId
+    }));
+    
+    console.log("📤 Sent transportConnected for:", transportId);
+  } catch (error) {
+    console.error("❌ Transport connect error:", error);
+  }
+}
     if (data.type === "createTransport") {
+      const {direction}=data;
       const room = rooms.get(roomId!);
       const peer = room?.peers.get(peerId!);
       if (!room || !peer) return;
@@ -105,6 +123,7 @@ wss.on("connection", (ws: WebSocket) => {
       ws.send(JSON.stringify({
         type: "transportCreated",
         data: {
+          direction,
           id: transport.id,
           iceParameters: transport.iceParameters,
           iceCandidates: transport.iceCandidates,
