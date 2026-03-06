@@ -1,13 +1,15 @@
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redis } from "@/lib/redis";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 export async function POST(req: Request) {
+
   try {
+
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -17,7 +19,7 @@ export async function POST(req: Request) {
     const { meetingId } = await req.json();
 
     const meeting = await prisma.meeting.findUnique({
-      where: { id: meetingId },
+      where: { id: meetingId }
     });
 
     if (!meeting) {
@@ -25,21 +27,36 @@ export async function POST(req: Request) {
     }
 
     if (meeting.hostId !== session.user.id) {
-      return NextResponse.json({ error: "Only host can end" }, { status: 403 });
+      return NextResponse.json({ error: "Only host can end meeting" }, { status: 403 });
     }
 
     await prisma.meeting.update({
       where: { id: meetingId },
-      data: { status: "ENDED" },
+      data: {
+        status: "ENDED",
+        endedAt: new Date()
+      }
     });
 
-    // 🧹 Clear Redis participants
     await redis.del(`meeting:${meetingId}:participants`);
+
+    // notify websocket server
+    await fetch("http://localhost:3001/endMeeting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ meetingId })
+    });
 
     return NextResponse.json({ success: true });
 
   } catch (error) {
-    console.error("END ERROR:", error);
+
+    console.error(error);
+
     return NextResponse.json({ error: "Server error" }, { status: 500 });
+
   }
+
 }

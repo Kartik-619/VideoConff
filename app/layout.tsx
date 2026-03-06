@@ -19,7 +19,7 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <body className="relative overflow-hidden">
+      <body className="relative min-h-screen bg-gradient-to-br from-sky-100 via-blue-100 to-indigo-200">
         <Providers>
 
           {/* Show background only if NOT meeting */}

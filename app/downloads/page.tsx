@@ -15,23 +15,63 @@ export default function DownloadsPage() {
   }, [status, router]);
 
   if (status === 'loading') {
-    return <div className="h-screen flex items-center justify-center">Loading...</div>;
+    return (
+      <div className="h-screen flex items-center justify-center text-white text-xl">
+        Loading...
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen px-10 py-16 bg-gradient-to-br from-indigo-50 via-blue-50 to-purple-100">
-      <h1 className="text-3xl font-extrabold text-slate-800 mb-8">
-        Downloads
-      </h1>
+    <div className="min-h-screen px-6 pt-32 pb-20">
 
-      <div className="rounded-xl bg-white p-10 shadow-md text-center">
-        <p className="text-lg font-semibold text-slate-700">
-          No downloads available
-        </p>
-        <p className="mt-2 text-slate-500">
-          Your meeting transcripts and PDFs will appear here after meetings end.
-        </p>
+      {/* Page Title */}
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-4xl font-extrabold text-white tracking-tight mb-12">
+          Downloads
+        </h1>
       </div>
+
+      {/* Empty State */}
+      <div className="max-w-4xl mx-auto">
+        <div
+          className="
+            bg-slate-900/30
+            backdrop-blur-2xl
+            border border-white/20
+            rounded-3xl
+            p-14
+            text-center
+            shadow-2xl
+          "
+        >
+          <p className="text-2xl font-semibold text-white">
+            No downloads available
+          </p>
+
+          <p className="mt-4 text-white/80 text-lg">
+            Your meeting transcripts and exported PDFs will appear here
+            once your meetings are completed.
+          </p>
+
+          <div className="mt-10">
+            <button
+              onClick={() => router.push('/')}
+              className="
+                px-8 py-3 rounded-full
+                bg-gradient-to-r from-cyan-500 to-indigo-600
+                text-white font-semibold
+                shadow-lg shadow-cyan-500/30
+                hover:scale-105
+                transition-all duration-300
+              "
+            >
+              Start a Meeting
+            </button>
+          </div>
+        </div>
+      </div>
+
     </div>
   );
 }

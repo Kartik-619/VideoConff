@@ -17,7 +17,7 @@ export default function ModelBackground(): JSX.Element {
 
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[50, 32, 32]} />
+      <sphereGeometry args={[35, 32, 32]} />
       <meshBasicMaterial
         map={texture}
         side={THREE.BackSide}

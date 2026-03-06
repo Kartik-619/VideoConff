@@ -3,12 +3,23 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { redis } from "@/lib/redis";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 export async function GET(
   req: Request,
   context: { params: Promise<{ meetingId: string }> }
 ) {
   try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     const { meetingId } = await context.params;
 
     if (!meetingId) {
@@ -35,11 +46,26 @@ export async function GET(
       );
     }
 
+    if (meeting.status === "ENDED") {
+      return NextResponse.json(
+        { error: "Meeting already ended" },
+        { status: 400 }
+      );
+    }
+    
+    const host = await prisma.user.findUnique({
+      where: { id: meeting.hostId },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
     const participantIds = await redis.smembers(
       `meeting:${meeting.id}:participants`
     );
 
-    const users = await prisma.user.findMany({
+    const participants = await prisma.user.findMany({
       where: {
         id: { in: participantIds },
       },
@@ -48,14 +74,6 @@ export async function GET(
         name: true,
       },
     });
-
-    const host = users.find(
-      (user) => user.id === meeting.hostId
-    );
-
-    const participants = users.filter(
-      (user) => user.id !== meeting.hostId
-    );
 
     return NextResponse.json({
       id: meeting.id,

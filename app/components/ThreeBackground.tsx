@@ -11,6 +11,7 @@ export default function ThreeBackground(): JSX.Element {
       <Canvas
         camera={{ position: [0, 3, 20], fov: 45 }}
         gl={{ alpha: true }}
+        style={{ background: 'transparent' }}
       >
         <ambientLight intensity={0.6} />
         <directionalLight position={[5, 10, 5]} intensity={0.7} />

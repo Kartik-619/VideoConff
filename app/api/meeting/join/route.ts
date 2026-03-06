@@ -28,8 +28,19 @@ export async function POST(req: Request) {
       );
     }
 
+    // Normalize meeting code
+    const normalizedCode = meetingCode.trim().toUpperCase();
+
+    // Validate format
+    if (normalizedCode.length !== 6) {
+      return NextResponse.json(
+        { error: "Invalid meeting code format" },
+        { status: 400 }
+      );
+    }
+
     const meeting = await prisma.meeting.findUnique({
-      where: { meetingCode },
+      where: { meetingCode: normalizedCode },
     });
 
     if (!meeting) {
@@ -39,9 +50,27 @@ export async function POST(req: Request) {
       );
     }
 
+    if (meeting.status === "ENDED") {
+      return NextResponse.json(
+        { error: "Meeting already ended" },
+        { status: 400 }
+      );
+    }
+
+    // Add participant to Redis
+    const participantsKey = `meeting:${meeting.id}:participants`;
+
     await redis.sadd(
-      `meeting:${meeting.id}:participants`,
+      participantsKey,
       session.user.id
+    );
+
+    // Store join timestamp with TTL
+    await redis.set(
+      `meeting:${meeting.id}:joined:${session.user.id}`,
+      Date.now(),
+      "EX",
+      7200
     );
 
     return NextResponse.json({
