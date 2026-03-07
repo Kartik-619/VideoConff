@@ -23,8 +23,10 @@ export async function POST() {
   const meeting = await prisma.meeting.create({
     data: {
       meetingCode: generateMeetingCode(),
-      hostId: userId,
       status: "CREATED",
+      host: {
+        connect: { id: userId },
+      },
     },
   });
 

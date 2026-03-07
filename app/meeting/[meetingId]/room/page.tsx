@@ -34,7 +34,7 @@ const sendTransportRef = useRef<mediasoupTypes.Transport|null>(null)
 const recvTransportRef = useRef<mediasoupTypes.Transport|null>(null)
 
 const localVideoRef = useRef<HTMLVideoElement>(null)
-
+const localThumbRef = useRef<HTMLVideoElement>(null)
 const producedRef = useRef(false)
 const startedRef = useRef(false)
 
@@ -475,7 +475,7 @@ className="w-[80vw] h-[70vh] object-contain rounded-xl"
 autoPlay
 muted
 playsInline
-ref={localVideoRef}
+ref={localThumbRef}
 className="w-32 h-24 object-cover rounded"
 />
 
@@ -503,36 +503,48 @@ className="w-32 h-24 object-cover rounded"
 
 {/* GRID VIEW */}
 
-{viewMode==="grid" && (
+{/* GRID VIEW */}
+{viewMode === "grid" && (
+  <div 
+    className="grid gap-2 h-full w-full"
+    style={{
+      gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
+      gridAutoRows: 'minmax(0, 1fr)'
+    }}
+  >
+    {/* Local video */}
+    <div className="relative w-full h-full min-h-0">
+      <video
+        autoPlay
+        muted
+        playsInline
+        ref={localVideoRef}
+        className="w-full h-full object-cover rounded-lg"
+      />
+      <div className="absolute bottom-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-sm">
+        You
+      </div>
+    </div>
 
-<>
-
-<video
-autoPlay
-muted
-playsInline
-ref={localVideoRef}
-className="w-full h-full object-cover rounded"
-/>
-
-{Array.from(remoteStreams.entries()).map(([id,stream])=>(
-
-<video
-key={id}
-autoPlay
-playsInline
-ref={v=>{
-if(v&&v.srcObject!==stream)v.srcObject=stream
-}}
-className={`w-full h-full object-cover rounded ${
-activeSpeaker===id?"ring-4 ring-blue-500":""
-}`}
-/>
-
-))}
-
-</>
-
+    {/* Remote videos */}
+    {Array.from(remoteStreams.entries()).map(([id, stream]) => (
+      <div key={id} className="relative w-full h-full min-h-0">
+        <video
+          autoPlay
+          playsInline
+          ref={v => {
+            if (v && v.srcObject !== stream) v.srcObject = stream
+          }}
+          className={`w-full h-full object-cover rounded-lg ${
+            activeSpeaker === id ? "ring-4 ring-blue-500" : ""
+          }`}
+        />
+        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-sm">
+          Participant {Array.from(remoteStreams.keys()).indexOf(id) + 1}
+        </div>
+      </div>
+    ))}
+  </div>
 )}
 
 </div>

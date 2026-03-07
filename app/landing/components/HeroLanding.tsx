@@ -13,16 +13,22 @@ export default function HeroLanding() {
       router.push('/login?redirect=create');
       return;
     }
-
-    const res = await fetch('/api/meeting/create', {
-      method: 'POST',
-    });
-
-    const data = await res.json();
-
-    if (data.meetingId) {
-      router.push(`/meeting/${data.meetingId}`);
+    try{
+      const res = await fetch('/api/meeting/create', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.meetingId) {
+        router.push(`/meeting/${data.meetingId}`);
+      }
+    }catch(e){
+      console.error("Error in HandleCreateMeeting",e);
     }
+   
+
+    
+
+    
   };
 
   const handleJoinRedirect = () => {
