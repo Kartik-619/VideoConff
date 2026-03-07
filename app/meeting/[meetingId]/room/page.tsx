@@ -15,7 +15,7 @@ FaDesktop,
 FaThLarge,
 FaUserFriends,
 FaPhoneSlash
-} from "react-icons/fa"
+} from "react-icons/fa";
 
 export default function MeetingRoom(){
 
