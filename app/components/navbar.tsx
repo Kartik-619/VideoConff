@@ -55,9 +55,7 @@ export default function Navbar() {
           text-xl sm:text-2xl 
           font-extrabold 
           tracking-widest 
-          bg-gradient-to-r 
-          from-cyan-500 
-          to-indigo-600 
+          bg-white
           bg-clip-text 
           text-transparent
           whitespace-nowrap
