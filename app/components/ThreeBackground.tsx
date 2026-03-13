@@ -3,6 +3,7 @@
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import ModelBackground from './ModelBackground';
+import { Suspense } from 'react';
 import { JSX } from 'react';
 
 export default function ThreeBackground(): JSX.Element {
@@ -17,7 +18,10 @@ export default function ThreeBackground(): JSX.Element {
         <directionalLight position={[5, 10, 5]} intensity={0.7} />
 
         {/* Sky / background */}
+        <Suspense fallback={null}>
         <ModelBackground />
+
+        </Suspense>
 
         <OrbitControls enableZoom={false} />
       </Canvas>

@@ -7,11 +7,12 @@ import { useFrame } from '@react-three/fiber';
 
 export default function ModelBackground(): JSX.Element {
   const texture = useTexture('/B.png');
+  texture.colorSpace = THREE.SRGBColorSpace;
   const meshRef = useRef<THREE.Mesh>(null);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (meshRef.current) {
-      meshRef.current.rotation.y += 0.0002;
+      meshRef.current.rotation.y += delta*0.05;
     }
   });
 
