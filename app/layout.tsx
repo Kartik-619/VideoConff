@@ -5,7 +5,18 @@ import { ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import Providers from './providers';
 import Navbar from './components/navbar';
-import ThreeBackground from './components/ThreeBackground';
+import dynamic from 'next/dynamic';
+
+const ThreeBackground = dynamic(
+  () => import('./components/ThreeBackground'),
+  {
+    ssr: false,
+    loading: () => {
+      return <div className="absolute inset-0 -z-10 bg-gradient-to-br from-sky-900 via-blue-900 to-indigo-900" />
+
+    }
+  })
+
 
 export default function RootLayout({
   children,
