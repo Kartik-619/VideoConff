@@ -1,7 +1,7 @@
 'use client'
 
 import * as mediasoupClient from "mediasoup-client"
-import { useEffect,useRef,useState } from "react"
+import { useEffect,useMemo,useRef,useState } from "react"
 import { useParams,useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { types as mediasoupTypes } from "mediasoup-client"
@@ -27,7 +27,7 @@ const { data:session } = useSession()
 
 const wsRef = useRef<WebSocket|null>(null)
 const reconnectAttempts = useRef(0)
-
+const [localStream, setLocalStream] = useState<MediaStream | null>(null)
 const deviceRef = useRef<mediasoupClient.Device|null>(null)
 
 const sendTransportRef = useRef<mediasoupTypes.Transport|null>(null)
@@ -63,12 +63,15 @@ const participants = remoteStreams.size + 1
 
 /* ---------------- GRID ALGORITHM ---------------- */
 
-let gridCols = 1
+const gridCols = useMemo(() => {
+  const total = participants;
+  if(total <= 1) return 1;
+  if(total <= 4) return 2;
+  if(total <= 9) return 3;
+  return 4;
+}, [participants]);
 
-if(participants<=1) gridCols=1
-else if(participants<=4) gridCols=2
-else if(participants<=9) gridCols=3
-else gridCols=4
+
 
 
 
@@ -86,9 +89,12 @@ await navigator.mediaDevices.getUserMedia({
 video:true,
 audio:true
 })
-
+setLocalStream(stream);
 if(localVideoRef.current){
 localVideoRef.current.srcObject = stream
+}
+if(localThumbRef.current) {
+  localThumbRef.current.srcObject = stream
 }
 
 await transport.produce({
@@ -504,44 +510,62 @@ className="w-32 h-24 object-cover rounded"
 {/* GRID VIEW */}
 
 {/* GRID VIEW */}
+{/* GRID VIEW */}
 {viewMode === "grid" && (
   <div 
-    className="grid gap-2 h-full w-full"
+    className="grid gap-2 h-full w-full p-2"
     style={{
       gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
       gridAutoRows: 'minmax(0, 1fr)'
     }}
   >
-    {/* Local video */}
-    <div className="relative w-full h-full min-h-0">
-      <video
-        autoPlay
-        muted
-        playsInline
-        ref={localVideoRef}
-        className="w-full h-full object-cover rounded-lg"
-      />
-      <div className="absolute bottom-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-sm">
-        You
+    {/* Only show local video if stream exists */}
+    {localStream && (
+      <div key="local" className="relative w-full h-full min-h-0 bg-gray-900 rounded-lg overflow-hidden">
+        <video
+          autoPlay
+          muted
+          playsInline
+          ref={el => {
+            if (el && el.srcObject !== localStream) {
+              el.srcObject = localStream
+            }
+          }}
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-sm">
+          You
+        </div>
+        {(isMuted || cameraOff) && (
+          <div className="absolute top-2 left-2 flex gap-1">
+            {isMuted && <FaMicrophoneSlash className="text-red-500 bg-black/60 p-1 rounded" size={20} />}
+            {cameraOff && <FaVideoSlash className="text-red-500 bg-black/60 p-1 rounded" size={20} />}
+          </div>
+        )}
       </div>
-    </div>
+    )}
 
     {/* Remote videos */}
     {Array.from(remoteStreams.entries()).map(([id, stream]) => (
-      <div key={id} className="relative w-full h-full min-h-0">
+      <div key={id} className="relative w-full h-full min-h-0 bg-gray-900 rounded-lg overflow-hidden">
         <video
           autoPlay
           playsInline
-          ref={v => {
-            if (v && v.srcObject !== stream) v.srcObject = stream
+          ref={el => {
+            if (el && el.srcObject !== stream) {
+              el.srcObject = stream
+            }
           }}
-          className={`w-full h-full object-cover rounded-lg ${
+          className={`w-full h-full object-cover ${
             activeSpeaker === id ? "ring-4 ring-blue-500" : ""
           }`}
         />
         <div className="absolute bottom-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-sm">
-          Participant {Array.from(remoteStreams.keys()).indexOf(id) + 1}
+          {id.slice(0, 4)}
         </div>
+        {activeSpeaker === id && (
+          <div className="absolute top-2 right-2 bg-green-500 rounded-full w-3 h-3 animate-pulse" />
+        )}
       </div>
     ))}
   </div>
