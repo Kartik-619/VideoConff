@@ -506,10 +506,6 @@ className="w-32 h-24 object-cover rounded"
 )}
 
 
-
-{/* GRID VIEW */}
-
-{/* GRID VIEW */}
 {/* GRID VIEW */}
 {viewMode === "grid" && (
   <div 
