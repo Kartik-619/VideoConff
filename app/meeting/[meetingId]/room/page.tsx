@@ -47,7 +47,7 @@ const [activeSpeaker,setActiveSpeaker] =
 useState<string|null>(null)
 
 const [viewMode,setViewMode] =
-useState<'grid'|'speaker'>('grid')
+useState<'speaker'>('speaker')
 
 const [isMuted,setIsMuted] = useState(false)
 const [cameraOff,setCameraOff] = useState(false)
@@ -55,26 +55,7 @@ const [cameraOff,setCameraOff] = useState(false)
 const [screenSharing,setScreenSharing] = useState(false)
 
 const [connectionStatus,setConnectionStatus] =
-useState("Connecting...")
-
-const participants = remoteStreams.size + 1
-
-
-
-/* ---------------- GRID ALGORITHM ---------------- */
-
-const gridCols = useMemo(() => {
-  const total = participants;
-  if(total <= 1) return 1;
-  if(total <= 4) return 2;
-  if(total <= 9) return 3;
-  return 4;
-}, [participants]);
-
-
-
-
-
+useState("Connecting...");
 /* ---------------- PRODUCE CAMERA ---------------- */
 
 async function startProducing(
@@ -125,8 +106,6 @@ track:stream.getAudioTracks()[0]
 })
 
 }
-
-
 
 /* ---------------- SCREEN SHARE ---------------- */
 
@@ -416,163 +395,34 @@ return(
 {connectionStatus}
 </div>
 
-<div className="absolute top-4 right-4 text-white bg-black/60 px-3 py-1 rounded">
-Participants: {participants}
-</div>
 
-
-
-{/* VIDEO AREA */}
-
-<div
-className={`flex-1 p-2 ${
-viewMode==="grid"
-? "grid gap-2 overflow-y-auto"
-: "flex flex-col"
-}`}
-style={
-viewMode==="grid"
-?{gridTemplateColumns:`repeat(${gridCols},1fr)`}
-:undefined
-}
->
-
-
-
-{/* SPEAKER VIEW */}
-
-{viewMode==="speaker" && (
-
-<div className="flex flex-col h-full">
-
-<div className="flex-1 flex items-center justify-center">
-
-{activeSpeaker && remoteStreams.get(activeSpeaker)?(
-
-<video
-autoPlay
-playsInline
-ref={v=>{
-const s = remoteStreams.get(activeSpeaker)
-if(v&&s)v.srcObject=s
-}}
-className="w-[80vw] h-[70vh] object-contain rounded-xl"
-/>
-
-):(
-
-<video
-autoPlay
-muted
-playsInline
-ref={localVideoRef}
-className="w-[80vw] h-[70vh] object-contain rounded-xl"
-/>
-
-)}
-
-</div>
-
-
-
-<div className="flex gap-2 overflow-x-auto p-2">
-
-<video
-autoPlay
-muted
-playsInline
-ref={localThumbRef}
-className="w-32 h-24 object-cover rounded"
-/>
-
-{Array.from(remoteStreams.entries()).map(([id,stream])=>(
-
-<video
-key={id}
-autoPlay
-playsInline
-ref={v=>{
-if(v&&v.srcObject!==stream)v.srcObject=stream
-}}
-className="w-32 h-24 object-cover rounded"
-/>
-
-))}
-
-</div>
-
-</div>
-
-)}
-
-
-{/* GRID VIEW */}
-{viewMode === "grid" && (
-  <div 
-    className="grid gap-2 h-full w-full p-2"
-    style={{
-      gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
-      gridAutoRows: 'minmax(0, 1fr)'
+{Array.from(remoteStreams.entries()).map(([id, stream]) => (
+  <video
+    key={id}
+    autoPlay
+    playsInline
+    ref={(video) => {
+      if (video) video.srcObject = stream;
     }}
-  >
-    {/* Only show local video if stream exists */}
-    {localStream && (
-      <div key="local" className="relative w-full h-full min-h-0 bg-gray-900 rounded-lg overflow-hidden">
-        <video
-          autoPlay
-          muted
-          playsInline
-          ref={el => {
-            if (el && el.srcObject !== localStream) {
-              el.srcObject = localStream
-            }
-          }}
-          className="w-full h-full object-cover"
-        />
-        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-sm">
-          You
-        </div>
-        {(isMuted || cameraOff) && (
-          <div className="absolute top-2 left-2 flex gap-1">
-            {isMuted && <FaMicrophoneSlash className="text-red-500 bg-black/60 p-1 rounded" size={20} />}
-            {cameraOff && <FaVideoSlash className="text-red-500 bg-black/60 p-1 rounded" size={20} />}
-          </div>
-        )}
-      </div>
-    )}
-
-    {/* Remote videos */}
-    {Array.from(remoteStreams.entries()).map(([id, stream]) => (
-      <div key={id} className="relative w-full h-full min-h-0 bg-gray-900 rounded-lg overflow-hidden">
-        <video
-          autoPlay
-          playsInline
-          ref={el => {
-            if (el && el.srcObject !== stream) {
-              el.srcObject = stream
-            }
-          }}
-          className={`w-full h-full object-cover ${
-            activeSpeaker === id ? "ring-4 ring-blue-500" : ""
-          }`}
-        />
-        <div className="absolute bottom-2 left-2 bg-black/60 text-white px-2 py-1 rounded text-sm">
-          {id.slice(0, 4)}
-        </div>
-        {activeSpeaker === id && (
-          <div className="absolute top-2 right-2 bg-green-500 rounded-full w-3 h-3 animate-pulse" />
-        )}
-      </div>
-    ))}
-  </div>
-)}
-
-</div>
-
-
+    className="absolute inset-0 w-full h-full object-cover"
+  />
+))}
+<video
+  ref={localVideoRef}
+  autoPlay
+  muted
+  playsInline
+  className="absolute inset-0 w-full h-full object-cover"
+/>
 
 {/* CONTROLS */}
-
+<video
+  ref={localThumbRef}
+  autoPlay
+  muted
+  playsInline
+  className="absolute bottom-24 right-6 w-48 h-32 rounded-lg border border-white object-cover"
+/>
 <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full">
 
 <button
@@ -595,15 +445,6 @@ setCameraOff(p=>!p)
 className="bg-gray-700 p-3 rounded-full text-white"
 >
 {cameraOff?<FaVideoSlash/>:<FaVideo/>}
-</button>
-
-<button
-onClick={()=>setViewMode("grid")}
-className={`p-3 rounded-full text-white ${
-viewMode==="grid"?"bg-blue-600":"bg-gray-700"
-}`}
->
-<FaThLarge/>
 </button>
 
 <button
