@@ -38,7 +38,7 @@ export default function ProfilePage() {
           backdrop-blur-2xl
           border border-white/20
           rounded-3xl
-          p-10
+          p-6
           shadow-2xl
         ">
 
@@ -83,17 +83,17 @@ export default function ProfilePage() {
           {/* Stats Section */}
           <div className="mt-10 grid md:grid-cols-3 gap-6 text-center">
 
-            <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <p className="text-3xl font-bold text-white">0</p>
               <p className="mt-2 text-white/70 text-sm">Meetings Hosted</p>
             </div>
 
-            <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <p className="text-3xl font-bold text-white">0</p>
               <p className="mt-2 text-white/70 text-sm">Hours Recorded</p>
             </div>
 
-            <div className="bg-white/5 rounded-xl p-6 border border-white/10">
+            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
               <p className="text-3xl font-bold text-white">0</p>
               <p className="mt-2 text-white/70 text-sm">Transcripts Generated</p>
             </div>
