@@ -1,481 +1,468 @@
 'use client'
 
 import * as mediasoupClient from "mediasoup-client"
-import { useEffect,useMemo,useRef,useState } from "react"
-import { useParams,useRouter } from "next/navigation"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { types as mediasoupTypes } from "mediasoup-client"
 
 import {
-FaMicrophone,
-FaMicrophoneSlash,
-FaVideo,
-FaVideoSlash,
-FaDesktop,
-FaThLarge,
-FaUserFriends,
-FaPhoneSlash
+  FaMicrophone,
+  FaMicrophoneSlash,
+  FaVideo,
+  FaVideoSlash,
+  FaDesktop,
+  FaThLarge,
+  FaUserFriends,
+  FaPhoneSlash
 } from "react-icons/fa";
 
-export default function MeetingRoom(){
+export default function MeetingRoom() {
 
-const params = useParams()
-const meetingId = params.meetingId as string
+  const params = useParams()
+  const meetingId = params.meetingId as string
 
-const router = useRouter()
-const { data:session } = useSession()
+  const router = useRouter()
+  const { data: session } = useSession()
 
-const wsRef = useRef<WebSocket|null>(null)
-const reconnectAttempts = useRef(0)
-const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-const deviceRef = useRef<mediasoupClient.Device|null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectAttempts = useRef(0)
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const deviceRef = useRef<mediasoupClient.Device | null>(null)
 
-const sendTransportRef = useRef<mediasoupTypes.Transport|null>(null)
-const recvTransportRef = useRef<mediasoupTypes.Transport|null>(null)
+  const sendTransportRef = useRef<mediasoupTypes.Transport | null>(null)
+  const recvTransportRef = useRef<mediasoupTypes.Transport | null>(null)
 
-const localVideoRef = useRef<HTMLVideoElement>(null)
-const localThumbRef = useRef<HTMLVideoElement>(null)
-const producedRef = useRef(false)
-const startedRef = useRef(false)
+  const localVideoRef = useRef<HTMLVideoElement>(null)
+  const localThumbRef = useRef<HTMLVideoElement>(null)
+  const producedRef = useRef(false)
+  const startedRef = useRef(false)
 
-const screenTrackRef = useRef<MediaStreamTrack|null>(null)
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null)
 
-const [remoteStreams,setRemoteStreams] =
-useState<Map<string,MediaStream>>(new Map())
+  const [remoteStreams, setRemoteStreams] =
+    useState<Map<string, MediaStream>>(new Map())
 
-const [activeSpeaker,setActiveSpeaker] =
-useState<string|null>(null)
+  const [activeSpeaker, setActiveSpeaker] =
+    useState<string | null>(null)
 
-const [viewMode,setViewMode] =
-useState<'speaker'>('speaker')
+  const [viewMode, setViewMode] =
+    useState<'speaker'>('speaker')
 
-const [isMuted,setIsMuted] = useState(false)
-const [cameraOff,setCameraOff] = useState(false)
+  const [isMuted, setIsMuted] = useState(false)
+  const [cameraOff, setCameraOff] = useState(false)
 
-const [screenSharing,setScreenSharing] = useState(false)
+  const [screenSharing, setScreenSharing] = useState(false)
 
-const [connectionStatus,setConnectionStatus] =
-useState("Connecting...");
-/* ---------------- PRODUCE CAMERA ---------------- */
+  const [connectionStatus, setConnectionStatus] =
+    useState("Connecting...");
+  /* ---------------- PRODUCE CAMERA ---------------- */
 
-async function startProducing(
-transport:mediasoupTypes.Transport
-){
+  async function startProducing(
+    transport: mediasoupTypes.Transport
+  ) {
 
-if(producedRef.current) return
-producedRef.current=true
+    if (producedRef.current) return
+    producedRef.current = true
 
-const stream =
-await navigator.mediaDevices.getUserMedia({
-video:true,
-audio:true
-})
-setLocalStream(stream);
-if(localVideoRef.current){
-localVideoRef.current.srcObject = stream
-}
-if(localThumbRef.current) {
-  localThumbRef.current.srcObject = stream
-}
-
-await transport.produce({
-  track: stream.getVideoTracks()[0],
-
-  encodings: [
-    {
-      maxBitrate: 100000,
-      scaleResolutionDownBy: 4
-    },
-    {
-      maxBitrate: 300000,
-      scaleResolutionDownBy: 2
-    },
-    {
-      maxBitrate: 900000,
-      scaleResolutionDownBy: 1
+    const stream =
+      await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      })
+    setLocalStream(stream);
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream
     }
-  ],
+    if (localThumbRef.current) {
+      localThumbRef.current.srcObject = stream
+    }
 
-  codecOptions: {
-    videoGoogleStartBitrate: 1000
+    await transport.produce({
+      track: stream.getVideoTracks()[0],
+
+      encodings: [
+        {
+          maxBitrate: 100000,
+          scaleResolutionDownBy: 4
+        },
+        {
+          maxBitrate: 300000,
+          scaleResolutionDownBy: 2
+        },
+        {
+          maxBitrate: 900000,
+          scaleResolutionDownBy: 1
+        }
+      ],
+
+      codecOptions: {
+        videoGoogleStartBitrate: 1000
+      }
+    });
+
+    await transport.produce({
+      track: stream.getAudioTracks()[0]
+    })
+
   }
-});
 
-await transport.produce({
-track:stream.getAudioTracks()[0]
-})
+  /* ---------------- SCREEN SHARE ---------------- */
 
-}
+  async function startScreenShare() {
 
-/* ---------------- SCREEN SHARE ---------------- */
+    try {
 
-async function startScreenShare(){
+      if (screenSharing) {
 
-try{
+        screenTrackRef.current?.stop()
+        setScreenSharing(false)
+        return
 
-if(screenSharing){
+      }
 
-screenTrackRef.current?.stop()
-setScreenSharing(false)
-return
+      const stream =
+        await navigator.mediaDevices.getDisplayMedia({
+          video: true
+        })
 
-}
+      const track = stream.getVideoTracks()[0]
 
-const stream =
-await navigator.mediaDevices.getDisplayMedia({
-video:true
-})
+      const transport = sendTransportRef.current
+      if (!transport) return
 
-const track = stream.getVideoTracks()[0]
+      await transport.produce({ track })
 
-const transport = sendTransportRef.current
-if(!transport) return
+      screenTrackRef.current = track
+      setScreenSharing(true)
 
-await transport.produce({track})
+      track.onended = () => setScreenSharing(false)
 
-screenTrackRef.current = track
-setScreenSharing(true)
+    } catch (err) {
+      console.error(err)
+    }
 
-track.onended = ()=> setScreenSharing(false)
+  }
 
-}catch(err){
-console.error(err)
-}
+  /* ---------------- WEBSOCKET ---------------- */
 
-}
+  function connectWebSocket() {
 
+    const ws = new WebSocket("ws://localhost:8080")
+    wsRef.current = ws
 
+    ws.onopen = () => {
 
-/* ---------------- WEBSOCKET ---------------- */
+      setConnectionStatus("Connected")
 
-function connectWebSocket(){
+      ws.send(JSON.stringify({
+        type: "join",
+        roomId: meetingId,
+        userId: session?.user?.id
+      }))
 
-const ws = new WebSocket("ws://localhost:8080")
-wsRef.current = ws
+    }
 
-ws.onopen = ()=>{
 
-setConnectionStatus("Connected")
 
-ws.send(JSON.stringify({
-type:"join",
-roomId:meetingId,
-userId:session?.user?.id
-}))
+    ws.onmessage = async (e) => {
 
-}
+      const data = JSON.parse(e.data)
 
 
 
-ws.onmessage = async(e)=>{
+      if (data.type === "activeSpeaker") {
+        setActiveSpeaker(data.producerId)
+      }
 
-const data = JSON.parse(e.data)
 
 
+      if (data.type === "meetingEnded") {
+        alert("Meeting ended")
+        cleanupAndExit()
+      }
 
-if(data.type==="activeSpeaker"){
-setActiveSpeaker(data.producerId)
-}
 
 
+      if (data.type === "rtpCapabilities") {
 
-if(data.type==="meetingEnded"){
-alert("Meeting ended")
-cleanupAndExit()
-}
+        const device = new mediasoupClient.Device()
 
+        await device.load({
+          routerRtpCapabilities: data.data
+        })
 
+        deviceRef.current = device
 
-if(data.type==="rtpCapabilities"){
+        ws.send(JSON.stringify({ type: "createTransport", direction: "send" }))
+        ws.send(JSON.stringify({ type: "createTransport", direction: "recv" }))
 
-const device = new mediasoupClient.Device()
+      }
 
-await device.load({
-routerRtpCapabilities:data.data
-})
 
-deviceRef.current=device
 
-ws.send(JSON.stringify({type:"createTransport",direction:"send"}))
-ws.send(JSON.stringify({type:"createTransport",direction:"recv"}))
+      if (data.type === "transportCreated") {
 
-}
+        const device = deviceRef.current
+        if (!device) return
 
+        let transport: mediasoupTypes.Transport
 
 
-if(data.type==="transportCreated"){
 
-const device = deviceRef.current
-if(!device) return
+        if (data.data.direction === "send") {
 
-let transport:mediasoupTypes.Transport
+          transport = device.createSendTransport(data.data)
+          sendTransportRef.current = transport
 
+          transport.on("connect", ({ dtlsParameters }, cb) => {
 
+            ws.send(JSON.stringify({
+              type: "connectTransport",
+              transportId: transport.id,
+              dtlsParameters
+            }))
 
-if(data.data.direction==="send"){
+            cb()
 
-transport=device.createSendTransport(data.data)
-sendTransportRef.current=transport
+          })
 
-transport.on("connect",({dtlsParameters},cb)=>{
+          transport.on("produce", (p, cb) => {
 
-ws.send(JSON.stringify({
-type:"connectTransport",
-transportId:transport.id,
-dtlsParameters
-}))
+            ws.send(JSON.stringify({
+              type: "producer",
+              transportId: transport.id,
+              kind: p.kind,
+              rtpParameters: p.rtpParameters
+            }))
 
-cb()
+            const handler = (e: MessageEvent) => {
 
-})
+              const res = JSON.parse(e.data)
 
-transport.on("produce",(p,cb)=>{
+              if (res.type === "produced") {
 
-ws.send(JSON.stringify({
-type:"producer",
-transportId:transport.id,
-kind:p.kind,
-rtpParameters:p.rtpParameters
-}))
+                cb({ id: res.data.producerId })
+                ws.removeEventListener("message", handler)
 
-const handler=(e:MessageEvent)=>{
+              }
 
-const res = JSON.parse(e.data)
+            }
 
-if(res.type==="produced"){
+            ws.addEventListener("message", handler)
 
-cb({id:res.data.producerId})
-ws.removeEventListener("message",handler)
+          })
 
-}
+          startProducing(transport)
 
-}
+        }
 
-ws.addEventListener("message",handler)
 
-})
 
-startProducing(transport)
+        else {
 
-}
+          transport = device.createRecvTransport(data.data)
+          recvTransportRef.current = transport
 
+          transport.on("connect", ({ dtlsParameters }, cb) => {
 
+            ws.send(JSON.stringify({
+              type: "connectTransport",
+              transportId: transport.id,
+              dtlsParameters
+            }))
 
-else{
+            cb()
 
-transport=device.createRecvTransport(data.data)
-recvTransportRef.current=transport
+          })
 
-transport.on("connect",({dtlsParameters},cb)=>{
+        }
 
-ws.send(JSON.stringify({
-type:"connectTransport",
-transportId:transport.id,
-dtlsParameters
-}))
+      }
 
-cb()
 
-})
 
-}
+      if (data.type === "producer") {
 
-}
+        const transport = recvTransportRef.current
+        const device = deviceRef.current
 
+        if (!transport || !device) return
 
+        setTimeout(() => {
 
-if(data.type==="producer"){
+          ws.send(JSON.stringify({
+            type: "consumer",
+            producerId: data.data.producerId,
+            transportId: transport.id,
+            rtpCapabilities: device.rtpCapabilities
+          }))
 
-const transport=recvTransportRef.current
-const device=deviceRef.current
+        }, 200)
 
-if(!transport||!device) return
+      }
 
-setTimeout(()=>{
 
-ws.send(JSON.stringify({
-type:"consumer",
-producerId:data.data.producerId,
-transportId:transport.id,
-rtpCapabilities:device.rtpCapabilities
-}))
 
-},200)
+      if (data.type === "consumerCreated") {
 
-}
+        const transport = recvTransportRef.current
+        if (!transport) return
 
+        const consumer =
+          await transport.consume(data.data)
 
+        const stream = new MediaStream()
+        stream.addTrack(consumer.track)
 
-if(data.type==="consumerCreated"){
+        setRemoteStreams(prev => {
+          const updated = new Map(prev)
+          updated.set(data.data.producerId, stream)
+          return updated
+        })
 
-const transport=recvTransportRef.current
-if(!transport) return
+        setActiveSpeaker(prev => prev ?? data.data.producerId)
 
-const consumer =
-await transport.consume(data.data)
+        ws.send(JSON.stringify({
+          type: "resumeConsumer",
+          consumerId: consumer.id
+        }))
 
-const stream = new MediaStream()
-stream.addTrack(consumer.track)
+      }
 
-setRemoteStreams(prev=>{
-const updated=new Map(prev)
-updated.set(data.data.producerId,stream)
-return updated
-})
+    }
 
-setActiveSpeaker(prev=>prev??data.data.producerId)
 
-ws.send(JSON.stringify({
-type:"resumeConsumer",
-consumerId:consumer.id
-}))
 
-}
+    ws.onclose = () => {
 
-}
+      setConnectionStatus("Disconnected")
 
+      if (reconnectAttempts.current < 5) {
 
+        setTimeout(() => {
+          reconnectAttempts.current++
+          connectWebSocket()
+        }, 2000)
 
-ws.onclose = ()=>{
+      }
 
-setConnectionStatus("Disconnected")
+    }
 
-if(reconnectAttempts.current<5){
+  }
 
-setTimeout(()=>{
-reconnectAttempts.current++
-connectWebSocket()
-},2000)
+  useEffect(() => {
 
-}
+    if (!meetingId || !session?.user?.id) return
+    if (startedRef.current) return
 
-}
+    startedRef.current = true
+    connectWebSocket()
 
-}
+  }, [meetingId, session])
 
+  /* ---------------- EXIT ---------------- */
 
+  function cleanupAndExit() {
 
-/* ---------------- INIT ---------------- */
+    sendTransportRef.current?.close()
+    recvTransportRef.current?.close()
+    wsRef.current?.close()
 
-useEffect(()=>{
+    router.push("/")
 
-if(!meetingId || !session?.user?.id) return
-if(startedRef.current) return
+  }
 
-startedRef.current=true
-connectWebSocket()
 
-},[meetingId,session])
+  return (
 
+    <div className="w-full h-screen bg-black flex flex-col">
 
+      {/* STATUS */}
 
-/* ---------------- EXIT ---------------- */
+      <div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded">
+        {connectionStatus}
+      </div>
 
-function cleanupAndExit(){
 
-sendTransportRef.current?.close()
-recvTransportRef.current?.close()
-wsRef.current?.close()
+      {Array.from(remoteStreams.entries()).map(([id, stream]) => (
+        <video
+          key={id}
+          autoPlay
+          playsInline
+          ref={(video) => {
+            if (video) video.srcObject = stream;
+          }}
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+      ))}
+      <video
+        ref={localVideoRef}
+        autoPlay
+        muted
+        playsInline
+        className="absolute inset-0 w-full h-full object-cover"
+      />
 
-router.push("/")
+      {/* CONTROLS */}
+      <video
+        ref={localThumbRef}
+        autoPlay
+        muted
+        playsInline
+        className="absolute bottom-24 right-6 w-48 h-32 rounded-lg border border-white object-cover"
+      />
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full">
 
-}
+        <button
+          onClick={() => {
+            const stream = localVideoRef.current?.srcObject as MediaStream
+            stream?.getAudioTracks().forEach(t => t.enabled = !t.enabled)
+            setIsMuted(p => !p)
+          }}
+          className="bg-gray-700 p-3 rounded-full text-white"
+        >
+          {isMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
+        </button>
 
+        <button
+          onClick={() => {
+            const stream = localVideoRef.current?.srcObject as MediaStream
+            stream?.getVideoTracks().forEach(t => t.enabled = !t.enabled)
+            setCameraOff(p => !p)
+          }}
+          className="bg-gray-700 p-3 rounded-full text-white"
+        >
+          {cameraOff ? <FaVideoSlash /> : <FaVideo />}
+        </button>
 
+        <button
+          onClick={() => setViewMode("speaker")}
+          className={`p-3 rounded-full text-white ${viewMode === "speaker" ? "bg-blue-600" : "bg-gray-700"
+            }`}
+        >
+          <FaUserFriends />
+        </button>
 
-/* ---------------- UI ---------------- */
+        <button
+          onClick={startScreenShare}
+          className={`p-3 rounded-full text-white ${screenSharing ? "bg-green-600" : "bg-blue-600"
+            }`}
+        >
+          <FaDesktop />
+        </button>
 
-return(
+        <button
+          onClick={cleanupAndExit}
+          className="bg-red-600 p-3 rounded-full text-white"
+        >
+          <FaPhoneSlash />
+        </button>
 
-<div className="w-full h-screen bg-black flex flex-col">
+      </div>
 
-{/* STATUS */}
+    </div>
 
-<div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded">
-{connectionStatus}
-</div>
-
-
-{Array.from(remoteStreams.entries()).map(([id, stream]) => (
-  <video
-    key={id}
-    autoPlay
-    playsInline
-    ref={(video) => {
-      if (video) video.srcObject = stream;
-    }}
-    className="absolute inset-0 w-full h-full object-cover"
-  />
-))}
-<video
-  ref={localVideoRef}
-  autoPlay
-  muted
-  playsInline
-  className="absolute inset-0 w-full h-full object-cover"
-/>
-
-{/* CONTROLS */}
-<video
-  ref={localThumbRef}
-  autoPlay
-  muted
-  playsInline
-  className="absolute bottom-24 right-6 w-48 h-32 rounded-lg border border-white object-cover"
-/>
-<div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full">
-
-<button
-onClick={()=>{
-const stream=localVideoRef.current?.srcObject as MediaStream
-stream?.getAudioTracks().forEach(t=>t.enabled=!t.enabled)
-setIsMuted(p=>!p)
-}}
-className="bg-gray-700 p-3 rounded-full text-white"
->
-{isMuted?<FaMicrophoneSlash/>:<FaMicrophone/>}
-</button>
-
-<button
-onClick={()=>{
-const stream=localVideoRef.current?.srcObject as MediaStream
-stream?.getVideoTracks().forEach(t=>t.enabled=!t.enabled)
-setCameraOff(p=>!p)
-}}
-className="bg-gray-700 p-3 rounded-full text-white"
->
-{cameraOff?<FaVideoSlash/>:<FaVideo/>}
-</button>
-
-<button
-onClick={()=>setViewMode("speaker")}
-className={`p-3 rounded-full text-white ${
-viewMode==="speaker"?"bg-blue-600":"bg-gray-700"
-}`}
->
-<FaUserFriends/>
-</button>
-
-<button
-onClick={startScreenShare}
-className={`p-3 rounded-full text-white ${
-screenSharing?"bg-green-600":"bg-blue-600"
-}`}
->
-<FaDesktop/>
-</button>
-
-<button
-onClick={cleanupAndExit}
-className="bg-red-600 p-3 rounded-full text-white"
->
-<FaPhoneSlash/>
-</button>
-
-</div>
-
-</div>
-
-)
+  )
 
 }

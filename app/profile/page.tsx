@@ -114,20 +114,7 @@ export default function ProfilePage() {
             >
               Edit Profile
             </button>
-
-            <button
-              className="
-                px-8 py-3 rounded-full
-                border border-white/30
-                text-white font-semibold
-                hover:bg-white/10
-                transition-all duration-300
-              "
-            >
-              Security Settings
-            </button>
-
-            <button
+             <button
               onClick={() => signOut()}
               className="
                 px-8 py-3 rounded-full
