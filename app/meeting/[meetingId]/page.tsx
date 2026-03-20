@@ -179,9 +179,9 @@ export default function MeetingLobby() {
   const isHost = session?.user?.id === meeting.host?.id;
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 transition-colors duration-500">
+    <div className="min-h-screen bg-slate-800/80 flex items-center justify-center p-6 transition-colors duration-500">
 
-      <div className="w-full max-w-2xl bg-slate-900/70 backdrop-blur-xl border border-slate-800 rounded-3xl shadow-2xl p-10">
+      <div className="w-full max-w-2xl  bg-slate-700/70 backdrop-blur-xl border border-slate-800 rounded-3xl shadow-2xl p-10">
 
         <h1 className="text-3xl font-bold text-white text-center">
           Meeting Lobby
@@ -192,7 +192,7 @@ export default function MeetingLobby() {
             Meeting Code
           </p>
 
-          <div className="mt-3 py-4 bg-slate-800 rounded-xl border border-slate-700 text-cyan-400 text-2xl font-mono tracking-widest">
+          <div className="mt-3 py-4 bg-slate-900 rounded-xl border border-slate-700 text-cyan-400 text-2xl font-mono tracking-widest">
             {meeting.meetingCode}
           </div>
         </div>
@@ -222,7 +222,7 @@ export default function MeetingLobby() {
             {meeting.participants.map((user) => (
               <div
                 key={user.id}
-                className="p-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-200"
+                className="p-3 rounded-xl bg-slate-900 border border-slate-700 text-slate-200"
               >
                 {user.name}
 
