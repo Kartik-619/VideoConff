@@ -56,6 +56,7 @@ export default function MeetingRoom() {
 
   const [connectionStatus, setConnectionStatus] =
     useState("Connecting...");
+  const [participants, setParticipants] = useState(0);
   /* ---------------- PRODUCE CAMERA ---------------- */
 
   async function startProducing(
@@ -158,7 +159,7 @@ export default function MeetingRoom() {
       ws.send(JSON.stringify({
         type: "join",
         roomId: meetingId,
-        userId: session?.user?.id
+        userId: session?.user?.id,
       }))
 
     }
@@ -169,7 +170,9 @@ export default function MeetingRoom() {
 
       const data = JSON.parse(e.data)
 
-
+      if (data.type === 'participants') {
+        setParticipants(data.size);
+      }
 
       if (data.type === "activeSpeaker") {
         setActiveSpeaker(data.producerId)
@@ -310,14 +313,21 @@ export default function MeetingRoom() {
         if (!transport) return
 
         const consumer =
-          await transport.consume(data.data)
-
-        const stream = new MediaStream()
-        stream.addTrack(consumer.track)
-
+          await transport.consume(data.data);
+        //Instead of mapping by producerId,we merge tracks into the same MediaStream.
         setRemoteStreams(prev => {
+
           const updated = new Map(prev)
-          updated.set(data.data.producerId, stream)
+
+          let stream = updated.get(data.data.producerId)
+
+          if (!stream) {
+            stream = new MediaStream()
+            updated.set(data.data.producerId, stream)
+          }
+
+          stream.addTrack(consumer.track)
+
           return updated
         })
 
@@ -379,30 +389,30 @@ export default function MeetingRoom() {
     <div className="w-full h-screen bg-black flex flex-col">
 
       {/* STATUS */}
-
+      <div className="absolute top-4 right-4 text-white bg-black/60 px-3 py-1 rounded">
+        participants:{participants}
+      </div>
       <div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded">
         {connectionStatus}
       </div>
 
 
-      {Array.from(remoteStreams.entries()).map(([id, stream]) => (
-        <video
-          key={id}
-          autoPlay
-          playsInline
-          ref={(video) => {
-            if (video) video.srcObject = stream;
-          }}
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-      ))}
-      <video
-        ref={localVideoRef}
-        autoPlay
-        muted
-        playsInline
-        className="absolute inset-0 w-full h-full object-cover"
-      />
+      {Array.from(remoteStreams.values()).map((stream, i) => {
+
+        if (stream.getVideoTracks().length === 0) return null
+
+        return (
+          <video
+            key={i}
+            autoPlay
+            playsInline
+            ref={(video) => {
+              if (video) video.srcObject = stream
+            }}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        )
+      })}
 
       {/* CONTROLS */}
       <video

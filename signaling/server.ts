@@ -12,7 +12,21 @@ app.use(bodyParser.json());
 
 const rooms = new Map<string, any>();
 
+/* ---------------- MEETING PARTICIPANTS BROADCAST ---------------- */
+function particpantNumber(roomId:string){
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const size=room.peers.size;
+  
+  room.peers.forEach((peer:any)=>{
+    peer.socket.send(JSON.stringify({
+      type:'participants',
+      size
+    }));
 
+})
+
+}
 /* ---------------- MEETING END BROADCAST ---------------- */
 
 function broadcastMeetingEnded(roomId: string) {
@@ -92,13 +106,11 @@ async function startServer(){
             peers:new Map(),
             audioLevelObserver
           };
-
+          //add broadcast particaipants 
+ ;
           rooms.set(roomId,room);
 
           console.log("Room created:",roomId);
-
-
-
 /* ---------------- ACTIVE SPEAKER DETECTION ---------------- */
 
           audioLevelObserver.on("volumes",(volumes)=>{
@@ -132,6 +144,7 @@ async function startServer(){
         room.peers.set(peerId,peer);
 
         console.log("Peer joined:",peerId);
+        particpantNumber(roomId)
 
 
 
@@ -155,7 +168,8 @@ async function startServer(){
             ws.send(JSON.stringify({
               type:"producer",
               data:{
-                producerId:producer.id
+                producerId:producer.id,
+                kind:producer.kind
               }
             }));
 
@@ -353,6 +367,7 @@ async function startServer(){
       peer.consumers.forEach((c:any)=>c.close());
 
       room.peers.delete(peerId);
+      particpantNumber(roomId)
 
       console.log("Peer left:",peerId);
 
