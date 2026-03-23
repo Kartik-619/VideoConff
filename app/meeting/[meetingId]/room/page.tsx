@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
 import { types as mediasoupTypes } from "mediasoup-client";
 import { LayoutCall } from "../../../components/CallRoom/components/callLayout";
-import {VideoTile} from '../../../components/CallRoom/components/VideoTile';
+import VideoTile from '../../../components/CallRoom/components/VideoTile';
 import {
   FaMicrophone,
   FaMicrophoneSlash,
