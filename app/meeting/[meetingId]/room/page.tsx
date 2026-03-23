@@ -4,8 +4,9 @@ import * as mediasoupClient from "mediasoup-client"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useSession } from "next-auth/react"
-import { types as mediasoupTypes } from "mediasoup-client"
-
+import { types as mediasoupTypes } from "mediasoup-client";
+import { LayoutCall } from "../../../components/CallRoom/components/callLayout";
+import {VideoTile} from '../../../components/CallRoom/components/VideoTile';
 import {
   FaMicrophone,
   FaMicrophoneSlash,

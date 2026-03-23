@@ -14,15 +14,15 @@ export default function VideoTile({stream,muted}:VideoTileProps){
             VideoRef.current.srcObject = stream;
         }
     },[VideoRef]);
-    
+
     return(
         <video
         ref={VideoRef}
         autoPlay
         muted={muted}
         playsInline
-        className="w-full h-full object-cover">
+        className="w-full h-full object-cover"/>
 
-        </video>
+        
     )
 }
