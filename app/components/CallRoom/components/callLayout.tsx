@@ -1,5 +1,5 @@
 'use client'
-import { Children, ReactNode } from "react";
+import {  ReactNode } from "react";
 
 interface GridProps{
     particpants:number;
@@ -17,7 +17,7 @@ export function LayoutCall({particpants,children}:GridProps){
             gridTemplateRows: `repeat(${rows}, 1fr)`
           }}>
             //allows to use react objects in your components
-            
+
             {children}
         </div>
     )
