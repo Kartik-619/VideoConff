@@ -6,6 +6,9 @@ import { randomUUID } from "crypto";
 import { createRouter } from "../app/mediasoup/router";
 import { createTransport } from "@/app/mediasoup/transport";
 import { createWebRTCServer } from "@/app/mediasoup/webrtc";
+import { prisma } from "@/lib/prisma";
+import { stringifyResumeDataCache } from "next/dist/server/resume-data-cache/resume-data-cache";
+import { Peer } from "./types/types";
 
 const app = express();
 app.use(bodyParser.json());
@@ -87,12 +90,24 @@ async function startServer(){
 
       if(data.type === "join"){
 
+        const userId= await prisma.user.findFirst({
+          where:{
+            id:data.userId
+          }
+        });
+
+        if(!userId){
+          console.error('The User does not exists, Signup to continue');
+          return;
+        }
+
+
         roomId = data.roomId;
         peerId = randomUUID();
 
         if(!rooms.has(roomId)){
 
-          const router = await createRouter();
+        const router = await createRouter();
 
           const audioLevelObserver =
           await router.createAudioLevelObserver({
@@ -130,11 +145,16 @@ async function startServer(){
 
         }
 
-
+        const name=await prisma.user.findFirst({
+          where:{
+            id:data.userId,
+          }
+        })
 
         const room = rooms.get(roomId);
 
-        const peer = {
+          const peer:Peer = {
+          name:userId.name,
           socket:ws,
           transports:new Map(),
           producers:new Map(),
@@ -169,7 +189,8 @@ async function startServer(){
               type:"producer",
               data:{
                 producerId:producer.id,
-                kind:producer.kind
+                kind:producer.kind,
+                peerId:otherPeerId
               }
             }));
 
