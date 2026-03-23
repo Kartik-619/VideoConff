@@ -1,7 +1,7 @@
 'use client';
 
 import * as THREE from 'three';
-import { JSX, useRef } from 'react';
+import { JSX, useRef, useState } from 'react';
 import { useTexture } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 

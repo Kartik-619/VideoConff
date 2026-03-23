@@ -5,11 +5,14 @@ import { OrbitControls } from '@react-three/drei';
 import ModelBackground from './ModelBackground';
 import { Suspense } from 'react';
 import { JSX } from 'react';
+import { useState } from 'react';
 
 export default function ThreeBackground(): JSX.Element {
+
   return (
     <div className="absolute inset-0 -z-10 pointer-events-none">
-      <Canvas
+     
+   <Canvas
         camera={{ position: [0, 3, 20], fov: 45 }}
         gl={{ alpha: true }}
         style={{ background: 'transparent' }}
