@@ -7,7 +7,6 @@ import { createRouter } from "../app/mediasoup/router";
 import { createTransport } from "@/app/mediasoup/transport";
 import { createWebRTCServer } from "@/app/mediasoup/webrtc";
 import { prisma } from "@/lib/prisma";
-import { stringifyResumeDataCache } from "next/dist/server/resume-data-cache/resume-data-cache";
 import { Peer } from "./types/types";
 
 const app = express();
@@ -415,8 +414,8 @@ async function startServer(){
 
 /* ---------------- HTTP SERVER ---------------- */
 
-  app.listen(3001,()=>{
-    console.log("HTTP control server running on http://localhost:3001");
+  app.listen(8080,'0.0.0.0',()=>{
+    console.log("WebSocket running ws://localhost:8080");
   });
 
 }

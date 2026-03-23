@@ -59,7 +59,21 @@ export default function MeetingRoom() {
     useState("Connecting...");
   const [participants, setParticipants] = useState(0);
   /* ---------------- PRODUCE CAMERA ---------------- */
+  const allStreams = useMemo(() => {
 
+    const streams: MediaStream[] = []
+  
+    if (localStream) {
+      streams.push(localStream)
+    }
+  
+    remoteStreams.forEach((stream) => {
+      streams.push(stream)
+    })
+  
+    return streams
+  
+  }, [localStream, remoteStreams])
   async function startProducing(
     transport: mediasoupTypes.Transport
   ) {
@@ -396,25 +410,23 @@ export default function MeetingRoom() {
       <div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded">
         {connectionStatus}
       </div>
+      <LayoutCall participants={allStreams.length}>
 
+        {allStreams.map((stream, i) => {
 
-      {Array.from(remoteStreams.values()).map((stream, i) => {
+          if (stream.getVideoTracks().length === 0) return null
 
-        if (stream.getVideoTracks().length === 0) return null
+          return (
+            <VideoTile
+              key={i}
+              stream={stream}
+              muted={stream === localStream}
+            />
+          )
 
-        return (
-          <video
-            key={i}
-            autoPlay
-            playsInline
-            ref={(video) => {
-              if (video) video.srcObject = stream
-            }}
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-        )
-      })}
+        })}
 
+      </LayoutCall>
       {/* CONTROLS */}
       <video
         ref={localThumbRef}

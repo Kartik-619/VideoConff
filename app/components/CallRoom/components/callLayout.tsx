@@ -2,13 +2,13 @@
 import {  ReactNode } from "react";
 
 interface GridProps{
-    particpants:number;
+    participants:number;
     children:ReactNode;
 }
 
-export function LayoutCall({particpants,children}:GridProps){
-    let cols=Math.ceil(Math.sqrt(particpants));
-    let rows=Math.ceil(particpants/cols);
+export function LayoutCall({participants,children}:GridProps){
+    let cols=Math.ceil(Math.sqrt(participants));
+    let rows=Math.ceil(participants/cols);
 
     return(
         <div   className="flex-1 grid gap-2 p-2" 
@@ -16,7 +16,6 @@ export function LayoutCall({particpants,children}:GridProps){
             gridTemplateColumns: `repeat(${cols}, 1fr)`,
             gridTemplateRows: `repeat(${rows}, 1fr)`
           }}>
-            //allows to use react objects in your components
 
             {children}
         </div>
