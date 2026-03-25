@@ -62,7 +62,7 @@ async function startServer(){
 
   const WebRTCServer = await createWebRTCServer();
 
-  const wss = new WebSocketServer({ port:8080 });
+  const wss = new WebSocketServer({port:8080});
 
   console.log("WebSocket running ws://localhost:8080");
 
@@ -414,9 +414,7 @@ async function startServer(){
 
 /* ---------------- HTTP SERVER ---------------- */
 
-  app.listen(8080,'0.0.0.0',()=>{
-    console.log("WebSocket running ws://localhost:8080");
-  });
+ 
 
 }
 
