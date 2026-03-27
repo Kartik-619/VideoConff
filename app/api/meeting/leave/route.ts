@@ -39,21 +39,23 @@ export async function POST(req: Request) {
       );
     }
 
-    // Remove participant
+    // ✅ REMOVE USER FROM REDIS (for everyone including host)
     await redis.srem(
       `meeting:${meetingId}:participants`,
       session.user.id
     );
 
-    // Optional: if host leaves → end meeting
-    if (meeting.hostId === session.user.id) {
-
-      await prisma.meeting.update({
-        where: { id: meetingId },
-        data: { status: "ENDED" },
+    // ✅ OPTIONAL: notify websocket for instant update
+    try {
+      await fetch("http://localhost:8080/startMeeting", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ meetingId }),
       });
-
-      await redis.del(`meeting:${meetingId}:participants`);
+    } catch (err) {
+      console.error("WS update failed:", err);
     }
 
     return NextResponse.json({ success: true });

@@ -5,10 +5,7 @@ import { ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import Providers from './providers';
 import Navbar from './components/navbar';
-import dynamic from 'next/dynamic';
 import ThreeBackground from './components/ThreeBackground';
-
-
 
 export default function RootLayout({
   children,
@@ -16,19 +13,17 @@ export default function RootLayout({
   children: ReactNode;
 }) {
   const pathname = usePathname();
-
-  // Hide navbar & background on meeting pages
   const isMeetingPage = pathname.startsWith('/meeting');
 
   return (
     <html lang="en">
-      <body className="relative min-h-screen bg-gradient-to-br from-sky-100 via-blue-100 to-indigo-200">
+      <body className="relative min-h-screen">
         <Providers>
 
-          {/* Show background only if NOT meeting */}
+          {/* Background only for normal pages */}
           {!isMeetingPage && <ThreeBackground />}
 
-          {/* Show navbar only if NOT meeting */}
+          {/* Hide navbar on meeting */}
           {!isMeetingPage && <Navbar />}
 
           <main className="relative z-10">

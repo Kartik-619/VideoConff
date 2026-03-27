@@ -46,6 +46,18 @@ export async function POST(req: Request) {
       data: { status: "LIVE" }, // MUST be LIVE
     });
 
+    try {
+      await fetch("http://localhost:8080/startMeeting", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ meetingId }),
+      });
+    } catch (err) {
+      console.error("WebSocket notify failed:", err);
+    }
+
     return NextResponse.json({ success: true });
 
   } catch (error) {

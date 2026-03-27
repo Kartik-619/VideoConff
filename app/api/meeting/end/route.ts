@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     await redis.del(`meeting:${meetingId}:participants`);
 
     // notify websocket server
-    await fetch("http://localhost:3001/endMeeting", {
+    await fetch("http://localhost:8080/endMeeting", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

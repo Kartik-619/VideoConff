@@ -13,7 +13,6 @@ import {
   FaVideo,
   FaVideoSlash,
   FaDesktop,
-  FaThLarge,
   FaUserFriends,
   FaPhoneSlash
 } from "react-icons/fa";
@@ -28,6 +27,7 @@ export default function MeetingRoom() {
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const deviceRef = useRef<mediasoupClient.Device | null>(null)
 
@@ -36,6 +36,7 @@ export default function MeetingRoom() {
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localThumbRef = useRef<HTMLVideoElement>(null)
+
   const producedRef = useRef(false)
   const startedRef = useRef(false)
 
@@ -58,22 +59,21 @@ export default function MeetingRoom() {
   const [connectionStatus, setConnectionStatus] =
     useState("Connecting...");
   const [participants, setParticipants] = useState(0);
-  /* ---------------- PRODUCE CAMERA ---------------- */
+
   const allStreams = useMemo(() => {
 
     const streams: MediaStream[] = []
-  
-    if (localStream) {
-      streams.push(localStream)
-    }
-  
+
+    if (localStream) streams.push(localStream)
+
     remoteStreams.forEach((stream) => {
       streams.push(stream)
     })
-  
+
     return streams
-  
+
   }, [localStream, remoteStreams])
+
   async function startProducing(
     transport: mediasoupTypes.Transport
   ) {
@@ -86,32 +86,19 @@ export default function MeetingRoom() {
         video: true,
         audio: true
       })
-    setLocalStream(stream);
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream
-    }
-    if (localThumbRef.current) {
-      localThumbRef.current.srcObject = stream
-    }
+
+    setLocalStream(stream)
+
+    if (localVideoRef.current) localVideoRef.current.srcObject = stream
+    if (localThumbRef.current) localThumbRef.current.srcObject = stream
 
     await transport.produce({
       track: stream.getVideoTracks()[0],
-
       encodings: [
-        {
-          maxBitrate: 100000,
-          scaleResolutionDownBy: 4
-        },
-        {
-          maxBitrate: 300000,
-          scaleResolutionDownBy: 2
-        },
-        {
-          maxBitrate: 900000,
-          scaleResolutionDownBy: 1
-        }
+        { maxBitrate: 100000, scaleResolutionDownBy: 4 },
+        { maxBitrate: 300000, scaleResolutionDownBy: 2 },
+        { maxBitrate: 900000, scaleResolutionDownBy: 1 }
       ],
-
       codecOptions: {
         videoGoogleStartBitrate: 1000
       }
@@ -120,21 +107,16 @@ export default function MeetingRoom() {
     await transport.produce({
       track: stream.getAudioTracks()[0]
     })
-
   }
-
-  /* ---------------- SCREEN SHARE ---------------- */
 
   async function startScreenShare() {
 
     try {
 
       if (screenSharing) {
-
         screenTrackRef.current?.stop()
         setScreenSharing(false)
         return
-
       }
 
       const stream =
@@ -160,11 +142,12 @@ export default function MeetingRoom() {
 
   }
 
-  /* ---------------- WEBSOCKET ---------------- */
-
   function connectWebSocket() {
 
-    const ws = new WebSocket("ws://localhost:8080")
+    if (wsRef.current) return; // ✅ FIX
+
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws"
+    const ws = new WebSocket(`${protocol}://${window.location.hostname}:8080`)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -176,10 +159,7 @@ export default function MeetingRoom() {
         roomId: meetingId,
         userId: session?.user?.id,
       }))
-
     }
-
-
 
     ws.onmessage = async (e) => {
 
@@ -193,14 +173,10 @@ export default function MeetingRoom() {
         setActiveSpeaker(data.producerId)
       }
 
-
-
       if (data.type === "meetingEnded") {
         alert("Meeting ended")
         cleanupAndExit()
       }
-
-
 
       if (data.type === "rtpCapabilities") {
 
@@ -214,10 +190,7 @@ export default function MeetingRoom() {
 
         ws.send(JSON.stringify({ type: "createTransport", direction: "send" }))
         ws.send(JSON.stringify({ type: "createTransport", direction: "recv" }))
-
       }
-
-
 
       if (data.type === "transportCreated") {
 
@@ -226,23 +199,18 @@ export default function MeetingRoom() {
 
         let transport: mediasoupTypes.Transport
 
-
-
         if (data.data.direction === "send") {
 
           transport = device.createSendTransport(data.data)
           sendTransportRef.current = transport
 
           transport.on("connect", ({ dtlsParameters }, cb) => {
-
             ws.send(JSON.stringify({
               type: "connectTransport",
               transportId: transport.id,
               dtlsParameters
             }))
-
             cb()
-
           })
 
           transport.on("produce", (p, cb) => {
@@ -259,25 +227,17 @@ export default function MeetingRoom() {
               const res = JSON.parse(e.data)
 
               if (res.type === "produced") {
-
                 cb({ id: res.data.producerId })
                 ws.removeEventListener("message", handler)
-
               }
-
             }
 
             ws.addEventListener("message", handler)
-
           })
 
           startProducing(transport)
 
-        }
-
-
-
-        else {
+        } else {
 
           transport = device.createRecvTransport(data.data)
           recvTransportRef.current = transport
@@ -291,14 +251,9 @@ export default function MeetingRoom() {
             }))
 
             cb()
-
           })
-
         }
-
       }
-
-
 
       if (data.type === "producer") {
 
@@ -317,19 +272,15 @@ export default function MeetingRoom() {
           }))
 
         }, 200)
-
       }
-
-
 
       if (data.type === "consumerCreated") {
 
         const transport = recvTransportRef.current
         if (!transport) return
 
-        const consumer =
-          await transport.consume(data.data);
-        //Instead of mapping by producerId,we merge tracks into the same MediaStream.
+        const consumer = await transport.consume(data.data)
+
         setRemoteStreams(prev => {
 
           const updated = new Map(prev)
@@ -352,82 +303,65 @@ export default function MeetingRoom() {
           type: "resumeConsumer",
           consumerId: consumer.id
         }))
-
       }
-
     }
-
-
 
     ws.onclose = () => {
 
       setConnectionStatus("Disconnected")
+      wsRef.current = null // ✅ FIX
 
       if (reconnectAttempts.current < 5) {
-
         setTimeout(() => {
           reconnectAttempts.current++
           connectWebSocket()
         }, 2000)
-
       }
-
     }
-
   }
 
   useEffect(() => {
 
-    if (!meetingId || !session?.user?.id) return
+    if (!meetingId) return
+    if (!session?.user?.id) return
     if (startedRef.current) return
 
     startedRef.current = true
     connectWebSocket()
 
-  }, [meetingId, session])
-
-  /* ---------------- EXIT ---------------- */
+  }, [meetingId]) // ✅ FIX
 
   function cleanupAndExit() {
 
     sendTransportRef.current?.close()
     recvTransportRef.current?.close()
+
     wsRef.current?.close()
+    wsRef.current = null // ✅ FIX
+    startedRef.current = false // ✅ FIX
 
     router.push("/")
-
   }
 
-
   return (
-
     <div className="w-full h-screen bg-black flex flex-col">
-
-      {/* STATUS */}
       <div className="absolute top-4 right-4 text-white bg-black/60 px-3 py-1 rounded">
         participants:{participants}
       </div>
+
       <div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded">
         {connectionStatus}
       </div>
+
       <LayoutCall participants={allStreams.length}>
-
         {allStreams.map((stream, i) => {
-
           if (stream.getVideoTracks().length === 0) return null
-
           return (
-            <VideoTile
-              key={i}
-              stream={stream}
-              muted={stream === localStream}
-            />
+            <VideoTile key={i} stream={stream} muted={stream === localStream} />
           )
-
         })}
-
       </LayoutCall>
-      {/* CONTROLS */}
+
       <video
         ref={localThumbRef}
         autoPlay
@@ -435,6 +369,7 @@ export default function MeetingRoom() {
         playsInline
         className="absolute bottom-24 right-6 w-48 h-32 rounded-lg border border-white object-cover"
       />
+
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full">
 
         <button
@@ -461,16 +396,14 @@ export default function MeetingRoom() {
 
         <button
           onClick={() => setViewMode("speaker")}
-          className={`p-3 rounded-full text-white ${viewMode === "speaker" ? "bg-blue-600" : "bg-gray-700"
-            }`}
+          className={`p-3 rounded-full text-white ${viewMode === "speaker" ? "bg-blue-600" : "bg-gray-700"}`}
         >
           <FaUserFriends />
         </button>
 
         <button
           onClick={startScreenShare}
-          className={`p-3 rounded-full text-white ${screenSharing ? "bg-green-600" : "bg-blue-600"
-            }`}
+          className={`p-3 rounded-full text-white ${screenSharing ? "bg-green-600" : "bg-blue-600"}`}
         >
           <FaDesktop />
         </button>
@@ -483,9 +416,6 @@ export default function MeetingRoom() {
         </button>
 
       </div>
-
     </div>
-
   )
-
 }

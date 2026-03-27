@@ -34,9 +34,9 @@ export async function POST() {
   await redis.set(`meeting:${meeting.id}:host`, userId);
   await redis.sadd(`meeting:${meeting.id}:participants`, userId);
 
-  await redis.expire(`meeting:${meeting.id}:participants`, 7200);
-  await redis.expire(`meeting:${meeting.id}:status`, 7200);
-  await redis.expire(`meeting:${meeting.id}:host`, 7200);
+  await redis.expire(`meeting:${meeting.id}:participants`, 86400);
+  await redis.expire(`meeting:${meeting.id}:status`, 86400);
+  await redis.expire(`meeting:${meeting.id}:host`, 86400);
 
   return NextResponse.json({
     meetingId: meeting.id,

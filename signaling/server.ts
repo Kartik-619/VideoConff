@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import { WebSocketServer, WebSocket } from "ws";
 import express from "express";
 import bodyParser from "body-parser";
@@ -15,20 +18,43 @@ app.use(bodyParser.json());
 const rooms = new Map<string, any>();
 
 /* ---------------- MEETING PARTICIPANTS BROADCAST ---------------- */
-function particpantNumber(roomId:string){
+async function broadcastLobby(roomId: string) {
   const room = rooms.get(roomId);
   if (!room) return;
-  const size=room.peers.size;
-  
-  room.peers.forEach((peer:any)=>{
-    peer.socket.send(JSON.stringify({
-      type:'participants',
-      size
-    }));
 
-})
+  // ✅ get meeting
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: roomId },
+  });
 
+  if (!meeting) return;
+
+  // ✅ get participants from DB (simple + correct)
+  const participants = await prisma.user.findMany({
+    where: {
+      participants: {
+        some: {
+          meetingId: roomId,
+        },
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  const payload = {
+    type: "lobbyUpdate",
+    participants,
+    status: meeting.status,
+  };
+
+  room.peers.forEach((peer: any) => {
+    peer.socket.send(JSON.stringify(payload));
+  });
 }
+
 /* ---------------- MEETING END BROADCAST ---------------- */
 
 function broadcastMeetingEnded(roomId: string) {
@@ -55,6 +81,14 @@ app.post("/endMeeting",(req,res)=>{
 
 });
 
+app.post("/startMeeting", async (req, res) => {
+  const { meetingId } = req.body;
+
+  await broadcastLobby(meetingId);
+
+  res.json({ ok: true });
+});
+
 
 /* ---------------- SERVER START ---------------- */
 
@@ -62,10 +96,11 @@ async function startServer(){
 
   const WebRTCServer = await createWebRTCServer();
 
-  const wss = new WebSocketServer({ port:8080 });
+  const server = app.listen(8080, () => {
+    console.log("HTTP + WS Server running on 8080");
+  });
 
-  console.log("WebSocket running ws://localhost:8080");
-
+  const wss = new WebSocketServer({ server });
 
 
 /* ---------------- CLIENT CONNECTION ---------------- */
@@ -163,7 +198,7 @@ async function startServer(){
         room.peers.set(peerId,peer);
 
         console.log("Peer joined:",peerId);
-        particpantNumber(roomId)
+        broadcastLobby(roomId)
 
 
 
@@ -387,7 +422,7 @@ async function startServer(){
       peer.consumers.forEach((c:any)=>c.close());
 
       room.peers.delete(peerId);
-      particpantNumber(roomId)
+      broadcastLobby(roomId)
 
       console.log("Peer left:",peerId);
 
@@ -414,9 +449,7 @@ async function startServer(){
 
 /* ---------------- HTTP SERVER ---------------- */
 
-  app.listen(8080,'0.0.0.0',()=>{
-    console.log("WebSocket running ws://localhost:8080");
-  });
+ 
 
 }
 

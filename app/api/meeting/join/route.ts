@@ -70,7 +70,7 @@ export async function POST(req: Request) {
       `meeting:${meeting.id}:joined:${session.user.id}`,
       Date.now(),
       "EX",
-      7200
+      86400
     );
 
     return NextResponse.json({

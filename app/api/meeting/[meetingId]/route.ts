@@ -61,6 +61,15 @@ export async function GET(
       },
     });
 
+    const waitingIds = await redis.smembers(
+    `meeting:${meeting.id}:waiting`
+    );
+
+    const waitingUsers = await prisma.user.findMany({
+      where: { id: { in: waitingIds } },
+      select: { id: true, name: true },
+    });
+
     const participantIds = await redis.smembers(
       `meeting:${meeting.id}:participants`
     );
@@ -81,6 +90,7 @@ export async function GET(
       status: meeting.status,
       host: host || null,
       participants: participants || [],
+      waitingUsers,
     });
 
   } catch (error) {
