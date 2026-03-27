@@ -96,10 +96,12 @@ async function startServer(){
 
   const WebRTCServer = await createWebRTCServer();
 
+  // ✅ Start Express HTTP server
   const server = app.listen(8080, () => {
     console.log("HTTP + WS Server running on 8080");
   });
 
+  // ✅ Attach WebSocket to SAME server
   const wss = new WebSocketServer({ server });
 
 

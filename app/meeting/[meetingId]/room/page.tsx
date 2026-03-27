@@ -144,10 +144,7 @@ export default function MeetingRoom() {
 
   function connectWebSocket() {
 
-    if (wsRef.current) return; // ✅ FIX
-
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws"
-    const ws = new WebSocket(`${protocol}://${window.location.hostname}:8080`)
+    const ws = new WebSocket("ws://localhost:8080")
     wsRef.current = ws
 
     ws.onopen = () => {

@@ -41,7 +41,7 @@ export default function LoginPage() {
 
       if (res?.error) {
 
-        // ✅ Handle Google account login attempt
+        // Handle Google account login attempt
         if (res.error === "GOOGLE_ACCOUNT") {
           setError("This account was created with Google. Please continue with Google login.");
         }
