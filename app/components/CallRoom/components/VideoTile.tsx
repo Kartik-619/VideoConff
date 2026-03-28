@@ -13,7 +13,12 @@ export default function VideoTile({stream,muted}:VideoTileProps){
         if(VideoRef.current){
             VideoRef.current.srcObject = stream;
         }
-    },[VideoRef]);
+        return () => {
+            if (VideoRef.current) {
+                VideoRef.current.srcObject = null;
+            }
+        };
+    },[stream]);
 
     return(
         <video

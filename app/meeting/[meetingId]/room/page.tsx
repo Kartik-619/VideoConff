@@ -61,18 +61,18 @@ export default function MeetingRoom() {
   const [participants, setParticipants] = useState(0);
 
   const allStreams = useMemo(() => {
+    const streams: { id: string, stream: MediaStream }[] = []
 
-    const streams: MediaStream[] = []
+    if (localStream) {
+      streams.push({ id: "local", stream: localStream })
+    }
 
-    if (localStream) streams.push(localStream)
-
-    remoteStreams.forEach((stream) => {
-      streams.push(stream)
+    remoteStreams.forEach((stream, id) => {
+      streams.push({ id, stream })
     })
 
     return streams
-
-  }, [localStream, remoteStreams])
+  }, [localStream, remoteStreams]);
 
   async function startProducing(
     transport: mediasoupTypes.Transport
@@ -334,8 +334,8 @@ export default function MeetingRoom() {
     recvTransportRef.current?.close()
 
     wsRef.current?.close()
-    wsRef.current = null // ✅ FIX
-    startedRef.current = false // ✅ FIX
+    wsRef.current = null 
+    startedRef.current = false 
 
     router.push("/")
   }
@@ -351,10 +351,15 @@ export default function MeetingRoom() {
       </div>
 
       <LayoutCall participants={allStreams.length}>
-        {allStreams.map((stream, i) => {
+        {allStreams.map(({ id, stream }) => {
           if (stream.getVideoTracks().length === 0) return null
+
           return (
-            <VideoTile key={i} stream={stream} muted={stream === localStream} />
+            <VideoTile
+              key={id}
+              stream={stream}
+              muted={stream === localStream}
+            />
           )
         })}
       </LayoutCall>
