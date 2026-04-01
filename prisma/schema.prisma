@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MeetingStatus {
+  CREATED
+  LIVE
+  ENDED
+}
+
+enum ParticipantRole {
+  HOST
+  PARTICIPANT
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String?
+  provider  String?
+  image     String?
+  createdAt DateTime @default(now())
+  name      String
+
+  meetings     Meeting[]
+  participants MeetingParticipant[]
+}
+
+model Meeting {
+  id          String        @id @default(uuid())
+  meetingCode String        @unique
+  hostId      String
+  status      MeetingStatus @default(CREATED)
+  createdAt   DateTime      @default(now())
+  endedAt     DateTime?
+
+  host         User                 @relation(fields: [hostId], references: [id])
+  participants MeetingParticipant[] // ⭐ THIS WAS MISSING
+
+  @@index([hostId])
+}
+
+model MeetingParticipant {
+  id        String          @id @default(uuid())
+  meetingId String
+  userId    String
+  role      ParticipantRole
+  joinedAt  DateTime        @default(now())
+  leftAt    DateTime?
+
+  meeting Meeting @relation(fields: [meetingId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([meetingId, userId])
+  @@index([meetingId])
+}
