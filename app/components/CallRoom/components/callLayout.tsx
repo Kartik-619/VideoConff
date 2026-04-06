@@ -1,23 +1,30 @@
 'use client'
-import {  ReactNode } from "react";
 
-interface GridProps{
-    participants:number;
-    children:ReactNode;
+import { ReactNode } from "react";
+
+interface Props {
+  count: number;
+  children: ReactNode;
 }
 
-export function LayoutCall({participants,children}:GridProps){
-    let cols=Math.ceil(Math.sqrt(participants));
-    let rows=Math.ceil(participants/cols);
+export function LayoutCall({ count, children }: Props) {
 
-    return(
-        <div   className="flex-1 grid gap-2 p-2" 
-        style={{
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gridTemplateRows: `repeat(${rows}, 1fr)`
-          }}>
+  let cols = 1;
 
-            {children}
-        </div>
-    )
+  if (count === 1) cols = 1;
+  else if (count === 2) cols = 2;
+  else if (count <= 4) cols = 2;
+  else if (count <= 6) cols = 3;
+  else cols = 4;
+
+  return (
+    <div
+      className="grid w-full h-full gap-3 p-3"
+      style={{
+        gridTemplateColumns: `repeat(${cols}, 1fr)`
+      }}
+    >
+      {children}
+    </div>
+  );
 }

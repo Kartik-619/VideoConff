@@ -8,8 +8,6 @@ import { redis } from "@/lib/redis";
 
 export async function POST(req: Request) {
   try {
-    console.log("JOIN ROUTE HIT");
-
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -18,6 +16,8 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
+
+    const userId = session.user.id;
 
     const { meetingCode } = await req.json();
 
@@ -28,10 +28,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Normalize meeting code
     const normalizedCode = meetingCode.trim().toUpperCase();
 
-    // Validate format
     if (normalizedCode.length !== 6) {
       return NextResponse.json(
         { error: "Invalid meeting code format" },
@@ -39,6 +37,7 @@ export async function POST(req: Request) {
       );
     }
 
+    //  Find meeting
     const meeting = await prisma.meeting.findUnique({
       where: { meetingCode: normalizedCode },
     });
@@ -57,28 +56,50 @@ export async function POST(req: Request) {
       );
     }
 
-    // Add participant to Redis
+    // =========================
+    //  REDIS DESIGN
+    // =========================
+
     const participantsKey = `meeting:${meeting.id}:participants`;
+    const joinedKey = `meeting:${meeting.id}:joined:${userId}`;
 
-    await redis.sadd(
-      participantsKey,
-      session.user.id
-    );
+    //  Prevent duplicate join (optional optimization)
+    const alreadyJoined = await redis.sismember(participantsKey, userId);
 
-    // Store join timestamp with TTL
-    await redis.set(
-      `meeting:${meeting.id}:joined:${session.user.id}`,
-      Date.now(),
-      "EX",
-      86400
-    );
+    if (!alreadyJoined) {
+      await redis.sadd(participantsKey, userId);
+    }
+
+    //  Store join timestamp
+    await redis.set(joinedKey, Date.now(), "EX", 86400);
+
+    // =========================
+    //  DB SYNC (HISTORY)
+    // =========================
+
+    await prisma.meetingParticipant.upsert({
+      where: {
+        meetingId_userId: {
+          meetingId: meeting.id,
+          userId,
+        },
+      },
+      update: {
+        leftAt: null, // user rejoined
+      },
+      create: {
+        meetingId: meeting.id,
+        userId,
+        role: "PARTICIPANT",
+      },
+    });
 
     return NextResponse.json({
       meetingId: meeting.id,
     });
 
-  } catch (err) {
-    console.error("JOIN ERROR:", err);
+  } catch (error) {
+    console.error("JOIN ERROR:", error);
 
     return NextResponse.json(
       { error: "Server error" },

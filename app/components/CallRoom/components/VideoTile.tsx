@@ -1,33 +1,40 @@
-'use client'
+'use client';
 
-import { useRef,useEffect } from "react";
+import { useEffect, useRef } from "react";
 
-interface VideoTileProps{
-    stream:MediaStream,
-    muted?:boolean
+interface Props {
+  stream: MediaStream;
+  muted?: boolean;
 }
 
-export default function VideoTile({stream,muted}:VideoTileProps){
-    const VideoRef=useRef<HTMLVideoElement|null>(null);
-    useEffect(()=>{
-        if(VideoRef.current){
-            VideoRef.current.srcObject = stream;
-        }
-        return () => {
-            if (VideoRef.current) {
-                VideoRef.current.srcObject = null;
-            }
-        };
-    },[stream]);
+export default function VideoTile({ stream, muted }: Props) {
+  const ref = useRef<HTMLVideoElement>(null);
 
-    return(
-        <video
-        ref={VideoRef}
+  useEffect(() => {
+    if (ref.current) {
+        ref.current.srcObject = stream;
+
+        ref.current.play().catch(() => {
+        console.log("Autoplay blocked");
+        });
+    }
+    }, [stream]);
+
+  return (
+    <div className="relative w-full h-full bg-black rounded-xl overflow-hidden">
+      <video
+        ref={ref}
         autoPlay
-        muted={muted}
         playsInline
-        className="w-full h-full object-cover"/>
-
-        
-    )
+        muted={muted}
+        style={{
+          width: "100%",
+          height: "100%",
+          objectFit: "cover",
+          transform: "scaleX(-1)" // only for local
+        }}
+        className="w-full h-full object-cover"
+      />
+    </div>
+  );
 }

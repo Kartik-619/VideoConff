@@ -7,7 +7,6 @@ import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   try {
-
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -19,23 +18,21 @@ export async function GET() {
 
     const meetings = await prisma.meeting.findMany({
       where: {
-        hostId: session.user.id
+        hostId: session.user.id,
       },
       orderBy: {
-        createdAt: "desc"
-      }
+        createdAt: "desc",
+      },
     });
 
     return NextResponse.json({ meetings });
 
   } catch (error) {
-
     console.error("HISTORY ERROR:", error);
 
     return NextResponse.json(
       { error: "Server error" },
       { status: 500 }
     );
-
   }
 }

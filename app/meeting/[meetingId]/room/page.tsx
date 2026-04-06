@@ -3,6 +3,7 @@
 import * as mediasoupClient from "mediasoup-client"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
+import toast from "react-hot-toast";
 import { useSession } from "next-auth/react"
 import { types as mediasoupTypes } from "mediasoup-client";
 import { LayoutCall } from "../../../components/CallRoom/components/callLayout";
@@ -21,6 +22,7 @@ export default function MeetingRoom() {
 
   const params = useParams()
   const meetingId = params.meetingId as string
+  const producerPeerMap = useRef<Map<string, string>>(new Map());
 
   const router = useRouter()
   const { data: session } = useSession()
@@ -36,6 +38,10 @@ export default function MeetingRoom() {
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localThumbRef = useRef<HTMLVideoElement>(null)
+  const socketIdRef = useRef<string | null>(null);
+
+  const videoProducerRef = useRef<mediasoupTypes.Producer | null>(null);
+  const audioProducerRef = useRef<mediasoupTypes.Producer | null>(null);
 
   const producedRef = useRef(false)
   const startedRef = useRef(false)
@@ -53,6 +59,7 @@ export default function MeetingRoom() {
 
   const [isMuted, setIsMuted] = useState(false)
   const [cameraOff, setCameraOff] = useState(false)
+  const meetingEndedRef = useRef(false);
 
   const [screenSharing, setScreenSharing] = useState(false)
 
@@ -61,18 +68,36 @@ export default function MeetingRoom() {
   const [participants, setParticipants] = useState(0);
 
   const allStreams = useMemo(() => {
-    const streams: { id: string, stream: MediaStream }[] = []
+  const result: { id: string; stream: MediaStream; isLocal: boolean }[] = [];
 
-    if (localStream) {
-      streams.push({ id: "local", stream: localStream })
-    }
+  // local stream
+  if (localStream) {
+    result.push({
+      id: "local",
+      stream: localStream,
+      isLocal: true
+    });
+  }
 
-    remoteStreams.forEach((stream, id) => {
-      streams.push({ id, stream })
-    })
+  // remote streams (already Map<peerId, stream>)
+  remoteStreams.forEach((stream, peerId) => {
+    if (peerId === socketIdRef.current) return;
+    result.push({
+      id: peerId,
+      stream,
+      isLocal: false
+    });
+  });
 
-    return streams
-  }, [localStream, remoteStreams]);
+  return result;
+}, [localStream, remoteStreams]);
+
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close(); // 🔥 important cleanup
+      producerPeerMap.current.clear(); // Clean up producerPeerMap
+    };
+  }, []);
 
   async function startProducing(
     transport: mediasoupTypes.Transport
@@ -92,7 +117,7 @@ export default function MeetingRoom() {
     if (localVideoRef.current) localVideoRef.current.srcObject = stream
     if (localThumbRef.current) localThumbRef.current.srcObject = stream
 
-    await transport.produce({
+    const videoProducer = await transport.produce({
       track: stream.getVideoTracks()[0],
       encodings: [
         { maxBitrate: 100000, scaleResolutionDownBy: 4 },
@@ -104,9 +129,13 @@ export default function MeetingRoom() {
       }
     });
 
-    await transport.produce({
-      track: stream.getAudioTracks()[0]
-    })
+    videoProducerRef.current = videoProducer;
+
+    const audioProducer = await transport.produce({
+  track: stream.getAudioTracks()[0]
+});
+
+audioProducerRef.current = audioProducer;
   }
 
   async function startScreenShare() {
@@ -142,28 +171,35 @@ export default function MeetingRoom() {
 
   }
 
-  function connectWebSocket() {
+  async function connectWebSocket() {
 
-    const ws = new WebSocket("ws://localhost:8080")
-    wsRef.current = ws
+    const res = await fetch("/api/ws-token");
+    if (!res.ok) {
+      console.error("Failed to get WS token");
+      return;
+    }
+
+    const { token } = await res.json();
+    
+    const ws = new WebSocket(`ws://localhost:8080?token=${token}`);
+    wsRef.current = ws;
 
     ws.onopen = () => {
 
-      setConnectionStatus("Connected")
+      setConnectionStatus("Connected");
 
       ws.send(JSON.stringify({
         type: "join",
-        roomId: meetingId,
-        userId: session?.user?.id,
-      }))
-    }
+        roomId: meetingId
+      }));
+    };
 
     ws.onmessage = async (e) => {
 
       const data = JSON.parse(e.data)
 
-      if (data.type === 'participants') {
-        setParticipants(data.size);
+      if (data.type === "lobbyUpdate") {
+        setParticipants(data.participants.length);
       }
 
       if (data.type === "activeSpeaker") {
@@ -171,8 +207,50 @@ export default function MeetingRoom() {
       }
 
       if (data.type === "meetingEnded") {
-        alert("Meeting ended")
-        cleanupAndExit()
+
+        if (meetingEndedRef.current) return; 
+
+        toast.error("Meeting ended by host"); // ✅ better UX
+
+        cleanupAndExit(); // 🔥 FIRST
+
+        wsRef.current?.close(); // 🔥 AFTER
+      }
+
+      if (data.type === "producerClosed") {
+        const producerId = data.producerId;
+
+        setRemoteStreams((prev) => {
+          const updated = new Map(prev);
+
+          const peerId = producerPeerMap.current.get(producerId);
+
+          // remove mapping
+          producerPeerMap.current.delete(producerId);
+
+          if (!peerId) return prev;
+
+          const stream = updated.get(peerId);
+
+          if (stream) {
+            stream.getTracks().forEach((track) => track.stop());
+            updated.delete(peerId);
+          }
+
+          return updated;
+        });
+      }
+
+      if (data.type === "joined") {
+        socketIdRef.current = data.peerId;
+        setRemoteStreams(new Map());
+        producerPeerMap.current.clear();
+        producedRef.current = false;
+        reconnectAttempts.current = 0;
+
+        ws.send(JSON.stringify({
+         type: "getParticipants"
+       }));
       }
 
       if (data.type === "rtpCapabilities") {
@@ -254,61 +332,100 @@ export default function MeetingRoom() {
 
       if (data.type === "producer") {
 
-        const transport = recvTransportRef.current
-        const device = deviceRef.current
+        // 🔥 ignore self producer
+        if (data.data.peerId === socketIdRef.current) return;
 
-        if (!transport || !device) return
+        const transport = recvTransportRef.current;
+        const device = deviceRef.current;
 
-        setTimeout(() => {
+        if (!transport || !device) return;
 
-          ws.send(JSON.stringify({
+        producerPeerMap.current.set(
+          data.data.producerId,
+          data.data.peerId
+        );
+
+        ws.send(
+          JSON.stringify({
             type: "consumer",
             producerId: data.data.producerId,
             transportId: transport.id,
-            rtpCapabilities: device.rtpCapabilities
-          }))
-
-        }, 200)
+            rtpCapabilities: device.rtpCapabilities,
+          })
+        );
       }
+
 
       if (data.type === "consumerCreated") {
 
-        const transport = recvTransportRef.current
-        if (!transport) return
+        const peerId = producerPeerMap.current.get(data.data.producerId);
 
-        const consumer = await transport.consume(data.data)
+        // 🔥 skip self stream
+        if (peerId === socketIdRef.current) return;
 
-        setRemoteStreams(prev => {
+        const transport = recvTransportRef.current;
+        if (!transport) return;
 
-          const updated = new Map(prev)
+        try {
+          const consumer = await transport.consume(data.data);
 
-          let stream = updated.get(data.data.producerId)
+          setRemoteStreams(prev => {
 
-          if (!stream) {
-            stream = new MediaStream()
-            updated.set(data.data.producerId, stream)
-          }
+            const updated = new Map(prev);
 
-          stream.addTrack(consumer.track)
+            const peerId = producerPeerMap.current.get(data.data.producerId);
+            if (!peerId) return prev;
 
-          return updated
-        })
+            let stream = updated.get(peerId);
 
-        setActiveSpeaker(prev => prev ?? data.data.producerId)
+            if (!stream) {
+              stream = new MediaStream();
+              updated.set(peerId, stream);
+            }
 
-        ws.send(JSON.stringify({
-          type: "resumeConsumer",
-          consumerId: consumer.id
-        }))
+            const alreadyExists = stream.getTracks().some(
+              (t) => t.id === consumer.track.id
+            );
+
+            if (!alreadyExists) {
+              stream.getTracks().forEach((t) => {
+                if (t.kind === consumer.track.kind) {
+                  stream.removeTrack(t);
+                }
+              });
+
+              stream.addTrack(consumer.track);
+            }
+
+            return updated;
+          });
+          const newStream = new MediaStream([consumer.track]);
+
+          const audio = new Audio();
+          audio.srcObject = newStream;
+          audio.autoplay = true;
+          audio.muted = false;
+
+          audio.play().catch(() => {});
+
+          setActiveSpeaker(prev => prev ?? data.data.producerId);
+
+          ws.send(JSON.stringify({
+            type: "resumeConsumer",
+            consumerId: consumer.id
+          }));
+        } catch (error) {
+          console.error("Error consuming stream:", error);
+        }
       }
     }
 
     ws.onclose = () => {
 
       setConnectionStatus("Disconnected")
-      wsRef.current = null // ✅ FIX
+      wsRef.current = null 
 
-      if (reconnectAttempts.current < 5) {
+      if (reconnectAttempts.current < 5 && startedRef.current && !meetingEndedRef.current) {
         setTimeout(() => {
           reconnectAttempts.current++
           connectWebSocket()
@@ -321,24 +438,65 @@ export default function MeetingRoom() {
 
     if (!meetingId) return
     if (!session?.user?.id) return
-    if (startedRef.current) return
 
     startedRef.current = true
     connectWebSocket()
 
-  }, [meetingId]) // ✅ FIX
+  }, [meetingId, session?.user?.id])
 
   function cleanupAndExit() {
 
-    sendTransportRef.current?.close()
-    recvTransportRef.current?.close()
+  if (meetingEndedRef.current) return;
 
-    wsRef.current?.close()
-    wsRef.current = null 
-    startedRef.current = false 
-
-    router.push("/")
+  // 🔥 stop camera + mic
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    localStream.getTracks().forEach(track => {
+      track.enabled = false;
+    });
+    setLocalStream(null);
   }
+
+  // 🔥 FORCE browser to release camera
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then(stream => {
+      stream.getTracks().forEach(track => track.stop());
+    })
+    .catch(() => {});
+
+  // 🔥 stop screen share
+  screenTrackRef.current?.stop();
+
+  // 🔥 clear video elements
+  if (localVideoRef.current) {
+    localVideoRef.current.srcObject = null;
+  }
+
+  if (localThumbRef.current) {
+    localThumbRef.current.srcObject = null;
+  }
+
+  // 🔥 close producers
+  videoProducerRef.current?.close();
+  audioProducerRef.current?.close();
+
+  // 🔥 close transports
+  sendTransportRef.current?.close();
+  recvTransportRef.current?.close();
+
+  // 🔥 close socket
+  wsRef.current?.close();
+  wsRef.current = null;
+
+  setRemoteStreams(new Map());
+
+  startedRef.current = false;
+
+  router.replace("/");
+
+  meetingEndedRef.current = true;
+
+}
 
   return (
     <div className="w-full h-screen bg-black flex flex-col">
@@ -350,35 +508,34 @@ export default function MeetingRoom() {
         {connectionStatus}
       </div>
 
-      <LayoutCall participants={allStreams.length}>
-        {allStreams.map(({ id, stream }) => {
-          if (stream.getVideoTracks().length === 0) return null
+      <LayoutCall count={allStreams.length}>
+        {allStreams.map(({ id, stream, isLocal }) => {
+          const hasVideo = stream.getVideoTracks().length > 0;
+
+          if (!hasVideo) return null;
 
           return (
             <VideoTile
               key={id}
               stream={stream}
-              muted={stream === localStream}
+              muted={isLocal}
             />
-          )
+          );
         })}
       </LayoutCall>
 
-      <video
-        ref={localThumbRef}
-        autoPlay
-        muted
-        playsInline
-        className="absolute bottom-24 right-6 w-48 h-32 rounded-lg border border-white object-cover"
-      />
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full">
 
-        <button
+       <button
           onClick={() => {
-            const stream = localVideoRef.current?.srcObject as MediaStream
-            stream?.getAudioTracks().forEach(t => t.enabled = !t.enabled)
-            setIsMuted(p => !p)
+            if (!localStream) return;
+
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (!audioTrack) return;
+
+            audioTrack.enabled = !audioTrack.enabled;
+            setIsMuted(!audioTrack.enabled);
           }}
           className="bg-gray-700 p-3 rounded-full text-white"
         >
@@ -387,9 +544,15 @@ export default function MeetingRoom() {
 
         <button
           onClick={() => {
-            const stream = localVideoRef.current?.srcObject as MediaStream
-            stream?.getVideoTracks().forEach(t => t.enabled = !t.enabled)
-            setCameraOff(p => !p)
+            if (!videoProducerRef.current) return;
+
+            if (videoProducerRef.current.paused) {
+              videoProducerRef.current.resume(); // ON
+              setCameraOff(false);
+            } else {
+              videoProducerRef.current.pause(); // OFF
+              setCameraOff(true);
+            }
           }}
           className="bg-gray-700 p-3 rounded-full text-white"
         >
@@ -411,7 +574,19 @@ export default function MeetingRoom() {
         </button>
 
         <button
-          onClick={cleanupAndExit}
+          onClick={async () => {
+
+            try {
+              await fetch("/api/meeting/end", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ meetingId }),
+              });
+            } catch (e) {
+              console.error(e);
+            }
+            cleanupAndExit();
+          }}
           className="bg-red-600 p-3 rounded-full text-white"
         >
           <FaPhoneSlash />

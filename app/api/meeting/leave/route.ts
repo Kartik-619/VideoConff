@@ -3,12 +3,11 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { redis } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
+import { redis } from "@/lib/redis";
 
 export async function POST(req: Request) {
   try {
-
     const session = await getServerSession(authOptions);
 
     if (!session?.user?.id) {
@@ -17,6 +16,8 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
+
+    const userId = session.user.id;
 
     const { meetingId } = await req.json();
 
@@ -27,7 +28,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check meeting exists
+    //  Check meeting exists
     const meeting = await prisma.meeting.findUnique({
       where: { id: meetingId },
     });
@@ -39,35 +40,57 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ REMOVE USER FROM REDIS (for everyone including host)
-    await redis.srem(
-      `meeting:${meetingId}:participants`,
-      session.user.id
-    );
+    // =========================
+    //  REDIS CLEANUP
+    // =========================
 
-    // ✅ OPTIONAL: notify websocket for instant update
+    const participantsKey = `meeting:${meetingId}:participants`;
+
+    const isMember = await redis.sismember(participantsKey, userId);
+
+    if (isMember) {
+      await redis.srem(participantsKey, userId);
+    }
+
+    // =========================
+    //  DB SYNC (HISTORY)
+    // =========================
+
+    await prisma.meetingParticipant.updateMany({
+      where: {
+        meetingId,
+        userId,
+        leftAt: null,
+      },
+      data: {
+        leftAt: new Date(),
+      },
+    });
+
+    // =========================
+    //  WS NOTIFY (FIXED)
+    // =========================
+
     try {
-      await fetch("http://localhost:8080/startMeeting", {
+      await fetch("http://localhost:8080/leave", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify({ meetingId }),
+        body: JSON.stringify({ meetingId, userId }),
       });
     } catch (err) {
-      console.error("WS update failed:", err);
+      console.error("WS leave notify failed:", err);
     }
 
     return NextResponse.json({ success: true });
 
   } catch (error) {
-
     console.error("LEAVE ERROR:", error);
 
     return NextResponse.json(
       { error: "Server error" },
       { status: 500 }
     );
-
   }
 }

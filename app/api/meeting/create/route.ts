@@ -6,40 +6,94 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redis } from "@/lib/redis";
 
+//  Generate meeting code
 function generateMeetingCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-export async function POST() {
+//  Ensure unique meeting code
+async function generateUniqueCode() {
+  let code: string;
+  let exists = true;
 
-  const session = await getServerSession(authOptions);
+  while (exists) {
+    code = generateMeetingCode();
 
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const meeting = await prisma.meeting.findUnique({
+      where: { meetingCode: code },
+    });
+
+    if (!meeting) exists = false;
   }
 
-  const userId = session.user.id;
+  return code!;
+}
 
-  const meeting = await prisma.meeting.create({
-    data: {
-      meetingCode: generateMeetingCode(),
-      status: "CREATED",
-      host: {
-        connect: { id: userId },
+export async function POST() {
+  try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const userId = session.user.id;
+
+    //  Generate safe unique code
+    const meetingCode = await generateUniqueCode();
+
+    //  Create meeting in DB
+    const meeting = await prisma.meeting.create({
+      data: {
+        meetingCode,
+        status: "CREATED",
+        host: {
+          connect: { id: userId },
+        },
       },
-    },
-  });
+    });
 
-  await redis.set(`meeting:${meeting.id}:status`, "CREATED");
-  await redis.set(`meeting:${meeting.id}:host`, userId);
-  await redis.sadd(`meeting:${meeting.id}:participants`, userId);
+    //  Add host to DB participants (history)
+    await prisma.meetingParticipant.create({
+      data: {
+        meetingId: meeting.id,
+        userId,
+        role: "HOST",
+      },
+    });
 
-  await redis.expire(`meeting:${meeting.id}:participants`, 86400);
-  await redis.expire(`meeting:${meeting.id}:status`, 86400);
-  await redis.expire(`meeting:${meeting.id}:host`, 86400);
+    // =========================
+    //  REDIS DESIGN APPLIED
+    // =========================
 
-  return NextResponse.json({
-    meetingId: meeting.id,
-    meetingCode: meeting.meetingCode,
-  });
+    const participantsKey = `meeting:${meeting.id}:participants`;
+    const hostKey = `meeting:${meeting.id}:host`;
+    const statusKey = `meeting:${meeting.id}:status`;
+
+    // ✅ Set Redis state
+    await redis.set(hostKey, userId);
+    await redis.set(statusKey, "CREATED");
+    await redis.sadd(participantsKey, userId);
+
+    // TTL 
+    await redis.expire(participantsKey, 86400);
+    await redis.expire(hostKey, 86400);
+    await redis.expire(statusKey, 86400);
+
+    return NextResponse.json({
+      meetingId: meeting.id,
+      meetingCode: meeting.meetingCode,
+    });
+
+  } catch (error) {
+    console.error("CREATE ERROR:", error);
+
+    return NextResponse.json(
+      { error: "Failed to create meeting" },
+      { status: 500 }
+    );
+  }
 }
