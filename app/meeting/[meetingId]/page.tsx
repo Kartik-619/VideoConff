@@ -74,7 +74,7 @@ useEffect(() => {
   const connectWS = async () => {
 
   // 🔥 prevent multiple connections
-  if (wsRef.current || connectingRef.current) return;
+  if (wsRef.current || connectingRef.current || joinedWSRef.current) return;
 
   connectingRef.current = true;
 
@@ -123,8 +123,11 @@ useEffect(() => {
       const data = JSON.parse(e.data);
 
       if (data.type === "meetingStarted") {
-        wsRef.current?.close();
-        router.replace(`/meeting/${meetingId}/room`);
+
+        setTimeout(() => {
+          router.replace(`/meeting/${meetingId}/room`);
+        }, 300);
+
       }
 
       if (data.type === "lobbyUpdate") {
@@ -179,11 +182,15 @@ useEffect(() => {
   connectWS();
 
   return () => {
+  if (reconnectTimeout) {
+    clearTimeout(reconnectTimeout);
+  }
 
-    if (reconnectTimeout) {
-      clearTimeout(reconnectTimeout);
-    }
-  };
+  // 🔥 CLOSE WS when leaving lobby
+  wsRef.current?.close();
+  wsRef.current = null;
+  joinedWSRef.current = false;
+};
 
 
 }, [meetingId, session?.user?.id]);

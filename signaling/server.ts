@@ -201,10 +201,10 @@ async function startServer() {
           }
 
           const room = rooms.get(roomId);
-{/*}
+
           // 🔥 REMOVE old peer of same user
           room.peers.forEach((existingPeer: any, id: string) => {
-            if (existingPeer.userId === userId) {
+            if (existingPeer.userId === userId && existingPeer.socket !== ws) {
               console.log("Removing duplicate peer:", id);
 
               existingPeer.transports.forEach((t: any) => t.close());
@@ -215,7 +215,7 @@ async function startServer() {
               redis.srem(`meeting:${roomId}:participants`, existingPeer.userId);
             }
           });
-*/}
+
           // ✅ store userId in peer
           const peer: Peer = {
             name: user.name,

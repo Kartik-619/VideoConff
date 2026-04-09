@@ -172,6 +172,7 @@ audioProducerRef.current = audioProducer;
   }
 
   async function connectWebSocket() {
+    if (wsRef.current) return;
 
     const res = await fetch("/api/ws-token");
     if (!res.ok) {
@@ -333,7 +334,7 @@ audioProducerRef.current = audioProducer;
       if (data.type === "producer") {
 
         // 🔥 ignore self producer
-        if (data.data.peerId === socketIdRef.current) return;
+        if (socketIdRef.current && data.data.peerId === socketIdRef.current) return;
 
         const transport = recvTransportRef.current;
         const device = deviceRef.current;
@@ -361,7 +362,7 @@ audioProducerRef.current = audioProducer;
         const peerId = producerPeerMap.current.get(data.data.producerId);
 
         // 🔥 skip self stream
-        if (peerId === socketIdRef.current) return;
+        if (socketIdRef.current && peerId === socketIdRef.current) return;
 
         const transport = recvTransportRef.current;
         if (!transport) return;
@@ -421,16 +422,10 @@ audioProducerRef.current = audioProducer;
     }
 
     ws.onclose = () => {
+      console.log("WS closed");
 
-      setConnectionStatus("Disconnected")
-      wsRef.current = null 
-
-      if (reconnectAttempts.current < 5 && startedRef.current && !meetingEndedRef.current) {
-        setTimeout(() => {
-          reconnectAttempts.current++
-          connectWebSocket()
-        }, 2000)
-      }
+      setConnectionStatus("Disconnected");
+      wsRef.current = null;
     }
   }
 
@@ -451,38 +446,45 @@ audioProducerRef.current = audioProducer;
   // 🔥 stop camera + mic
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
-    localStream.getTracks().forEach(track => {
-      track.enabled = false;
-    });
     setLocalStream(null);
   }
 
-  // 🔥 FORCE browser to release camera
+  // 🔥 release camera
   navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    .then(stream => {
-      stream.getTracks().forEach(track => track.stop());
-    })
+    .then(stream => stream.getTracks().forEach(track => track.stop()))
     .catch(() => {});
 
   // 🔥 stop screen share
-  screenTrackRef.current?.stop();
+  if (screenTrackRef.current) {
+    screenTrackRef.current.stop();
+    screenTrackRef.current = null;
+  }
 
   // 🔥 clear video elements
-  if (localVideoRef.current) {
-    localVideoRef.current.srcObject = null;
+  if (localVideoRef.current) localVideoRef.current.srcObject = null;
+  if (localThumbRef.current) localThumbRef.current.srcObject = null;
+
+  // 🔥 close producers safely
+  if (videoProducerRef.current && !videoProducerRef.current.closed) {
+    videoProducerRef.current.close();
+    videoProducerRef.current = null;
   }
 
-  if (localThumbRef.current) {
-    localThumbRef.current.srcObject = null;
+  if (audioProducerRef.current && !audioProducerRef.current.closed) {
+    audioProducerRef.current.close();
+    audioProducerRef.current = null;
   }
 
-  // 🔥 close producers
-  videoProducerRef.current?.close();
-  audioProducerRef.current?.close();
+  // 🔥 close transports safely
+  if (sendTransportRef.current && !sendTransportRef.current.closed) {
+    sendTransportRef.current.close();
+    sendTransportRef.current = null;
+  }
 
-  // 🔥 close transports
-  sendTransportRef.current?.close();
-  recvTransportRef.current?.close();
+  if (recvTransportRef.current && !recvTransportRef.current.closed) {
+    recvTransportRef.current.close();
+    recvTransportRef.current = null;
+  }
 
   // 🔥 close socket
   wsRef.current?.close();
@@ -492,10 +494,9 @@ audioProducerRef.current = audioProducer;
 
   startedRef.current = false;
 
-  router.replace("/");
-
   meetingEndedRef.current = true;
 
+  router.replace("/");
 }
 
   return (
