@@ -291,6 +291,33 @@ async function startServer() {
   });
 }
 
+
+// ---------------- CHAT ----------------
+if (data.type === "chatMessage") {
+  if (!data.message || typeof data.message !== "string") return;
+
+  const message = data.message.trim();
+  if (!message) return;
+
+  const room = rooms.get(roomId);
+  const peer = room?.peers.get(peerId);
+  if (!room || !peer) return;
+
+  const messagePayload = {
+    type: "chatMessage",
+    data: {
+      message,
+      userId: peer.userId,
+      name: peer.name,
+      timestamp: Date.now(),
+    },
+  };
+
+  room.peers.forEach((p: any) => {
+    p.socket.send(JSON.stringify(messagePayload));
+  });
+}
+
       /* ---------------- CREATE TRANSPORT ---------------- */
       if (data.type === "createTransport") {
         const room = rooms.get(roomId);
