@@ -3,6 +3,7 @@ import * as mediasoup from "mediasoup";
 
 export interface Peer {
   name:string;
+  userId:string;
   socket: WebSocket;
   transports: Map<string, mediasoup.types.WebRtcTransport>;
   producers: Map<string, mediasoup.types.Producer>;

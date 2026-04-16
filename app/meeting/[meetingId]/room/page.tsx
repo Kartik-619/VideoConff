@@ -23,6 +23,7 @@ export default function MeetingRoom() {
   const params = useParams()
   const meetingId = params.meetingId as string
   const producerPeerMap = useRef<Map<string, string>>(new Map());
+  const pendingProducers = useRef<any[]>([]);
 
   const router = useRouter()
   const { data: session } = useSession()
@@ -171,6 +172,32 @@ audioProducerRef.current = audioProducer;
 
   }
 
+  function processPendingProducers() {
+  const device = deviceRef.current;
+  const transport = recvTransportRef.current;
+
+  if (!device || !transport) return;
+
+  pendingProducers.current.forEach((data) => {
+    producerPeerMap.current.set(
+      data.data.producerId,
+      data.data.peerId
+    );
+
+    wsRef.current?.send(
+      JSON.stringify({
+        type: "consumer",
+        producerId: data.data.producerId,
+        transportId: transport.id,
+        rtpCapabilities: device.rtpCapabilities,
+      })
+    );
+  });
+
+  pendingProducers.current = [];
+}
+
+
   async function connectWebSocket() {
     if (wsRef.current) return;
 
@@ -317,6 +344,11 @@ audioProducerRef.current = audioProducer;
 
           transport = device.createRecvTransport(data.data)
           recvTransportRef.current = transport
+          ws.send(JSON.stringify({
+            type: "syncProducers"
+          }));
+          // ✅ process immediately
+          processPendingProducers();
 
           transport.on("connect", ({ dtlsParameters }, cb) => {
 
@@ -327,19 +359,52 @@ audioProducerRef.current = audioProducer;
             }))
 
             cb()
+
+            // ✅ safety replay (if anything missed)
+            processPendingProducers();
+
+            
+          // 🔥 Process queued producers
+          pendingProducers.current.forEach((data) => {
+            const device = deviceRef.current;
+            const transport = recvTransportRef.current;
+
+            if (!device || !transport) return;
+
+            producerPeerMap.current.set(
+              data.data.producerId,
+              data.data.peerId
+            );
+
+            wsRef.current?.send(
+              JSON.stringify({
+                type: "consumer",
+                producerId: data.data.producerId,
+                transportId: transport.id,
+                rtpCapabilities: device.rtpCapabilities,
+              })
+            );
+          });
+
+          // clear queue after processing
+          pendingProducers.current = [];
+
           })
         }
       }
 
       if (data.type === "producer") {
 
-        // 🔥 ignore self producer
+        // ignore self producer by userId
         if (socketIdRef.current && data.data.peerId === socketIdRef.current) return;
 
         const transport = recvTransportRef.current;
         const device = deviceRef.current;
 
-        if (!transport || !device) return;
+        if (!transport || !device) {
+          pendingProducers.current.push(data);
+          return;
+        }
 
         producerPeerMap.current.set(
           data.data.producerId,
@@ -359,9 +424,8 @@ audioProducerRef.current = audioProducer;
 
       if (data.type === "consumerCreated") {
 
+        // skip self stream by checking producer userId against session user id
         const peerId = producerPeerMap.current.get(data.data.producerId);
-
-        // 🔥 skip self stream
         if (socketIdRef.current && peerId === socketIdRef.current) return;
 
         const transport = recvTransportRef.current;
@@ -400,14 +464,13 @@ audioProducerRef.current = audioProducer;
 
             return updated;
           });
-          const newStream = new MediaStream([consumer.track]);
-
-          const audio = new Audio();
-          audio.srcObject = newStream;
-          audio.autoplay = true;
-          audio.muted = false;
-
-          audio.play().catch(() => {});
+          if (consumer.track.kind === "audio") {
+            const audio = new Audio();
+            audio.srcObject = new MediaStream([consumer.track]);
+            audio.autoplay = true;
+            audio.muted = false;
+            audio.play().catch(() => {});
+          }
 
           setActiveSpeaker(prev => prev ?? data.data.producerId);
 
