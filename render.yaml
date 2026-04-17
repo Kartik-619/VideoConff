@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: videoconff-signaling
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node signaling/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+    healthCheck:
+      path: /health
+    plan: free
