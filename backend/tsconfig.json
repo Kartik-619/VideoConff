@@ -7,10 +7,10 @@
     "rootDir": "./",
     "strict": false,
     "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": false,
@@ -18,9 +18,7 @@
     "tsBuildInfoFile": null
   },
   "include": [
-    "signaling/**/*.ts",
-    "lib/**/*.ts",
-    "app/**/*.ts"
+    "signaling/**/*.ts"
   ],
   "exclude": [
     "node_modules",
