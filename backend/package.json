@@ -5,7 +5,6 @@
   "main": "dist/signaling/server.js",
   "scripts": {
     "build": "tsc",
-    "postinstall": "prisma generate",
     "start": "node dist/signaling/server.js",
     "dev": "ts-node signaling/server.ts"
   },
