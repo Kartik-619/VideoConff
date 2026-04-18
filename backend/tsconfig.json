@@ -18,7 +18,9 @@
     "tsBuildInfoFile": null
   },
   "include": [
-    "signaling/**/*.ts"
+    "signaling/**/*.ts",
+    "lib/**/*.ts",
+    "app/**/*.ts"
   ],
   "exclude": [
     "node_modules",
