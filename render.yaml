@@ -1,10 +1,9 @@
 services:
   - type: web
     name: videoconff-signaling
-    runtime: node
-    rootDir: backend
-    buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: npm start
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
     envVars:
       - key: NODE_ENV
         value: production
