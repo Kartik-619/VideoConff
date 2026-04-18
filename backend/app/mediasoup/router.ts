@@ -1,8 +1,7 @@
 import * as mediasoup from "mediasoup";
-import type { RtpCodecCapability } from "mediasoup/types";
 import { createWorker } from "./worker";
 
-const mediaCodecs: RtpCodecCapability[] = [
+const mediaCodecs: { kind: string; mimeType: string; clockRate: number; channels?: number; preferredPayloadType: number; parameters?: { [key: string]: any } }[] = [
   {
     kind: "audio",
     mimeType: "audio/opus",
