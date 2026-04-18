@@ -2,7 +2,7 @@ services:
   - type: web
     name: videoconff-signaling
     runtime: node
-    buildCommand: npm install && npm run build
+    buildCommand: npm install
     startCommand: node signaling/server.js
     envVars:
       - key: NODE_ENV
