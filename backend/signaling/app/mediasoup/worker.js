@@ -1,0 +1,23 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createWorker = void 0;
+const mediasoup = require("mediasoup");
+let worker = null;
+const createWorker = async () => {
+    // ✅ already created
+    if (worker) {
+        return worker;
+    }
+    worker = await mediasoup.createWorker({
+        logLevel: "error",
+        rtcMinPort: 10000,
+        rtcMaxPort: 59999
+    });
+    console.log("Worker created:", worker.pid);
+    worker.on("died", () => {
+        console.error("Worker died:", worker?.pid);
+        setTimeout(() => process.exit(1), 2000);
+    });
+    return worker;
+};
+exports.createWorker = createWorker;
