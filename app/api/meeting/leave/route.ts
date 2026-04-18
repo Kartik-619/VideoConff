@@ -72,7 +72,7 @@ export async function POST(req: Request) {
     // =========================
 
     try {
-      await fetch("http://localhost:8080/leave", {
+      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/leave`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

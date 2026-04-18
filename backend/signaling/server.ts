@@ -7,6 +7,7 @@ import express from "express";
 import bodyParser from "body-parser";
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
+import cors from "cors";
 
 import { createRouter } from "../mediasoup/router";
 import { createTransport } from "../mediasoup/transport";
@@ -18,6 +19,15 @@ import { redis } from "../lib/redis";
 import { Peer } from "./types/types";
 
 const app = express();
+
+// CORS configuration - allow frontend
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? process.env.NEXTAUTH_URL 
+    : ['http://localhost:3000', 'http://localhost:3001'],
+  credentials: true
+}));
+
 app.use(bodyParser.json());
 
 // Root endpoint to test backend

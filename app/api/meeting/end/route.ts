@@ -87,7 +87,7 @@ export async function POST(req: Request) {
     // =========================
 
     try {
-      await fetch("http://localhost:8080/endMeeting", {
+      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/endMeeting`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

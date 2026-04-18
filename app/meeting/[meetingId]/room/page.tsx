@@ -246,7 +246,7 @@ audioProducerRef.current = audioProducer;
 
     const { token } = await res.json();
     
-    const ws = new WebSocket(`${process.env.WEBSOCKET_URL || 'ws://localhost:8080'}?token=${token}`);
+    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https://', 'wss://').replace('http://', 'ws://') || 'ws://localhost:8080'}?token=${token}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
