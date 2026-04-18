@@ -15,11 +15,11 @@ RUN npm install
 
 COPY backend/ .
 
-# FIX: use npx to avoid permission issues
-RUN npx tsc
+# FIX: give permission + run tsc
+RUN chmod +x ./node_modules/.bin/tsc && ./node_modules/.bin/tsc
 
 # Prisma generate
-RUN ./node_modules/.bin/prisma generate
+RUN chmod +x ./node_modules/.bin/prisma && ./node_modules/.bin/prisma generate
 
 EXPOSE 8080
 
