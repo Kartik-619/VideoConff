@@ -2,7 +2,7 @@ services:
   - type: web
     name: videoconff-signaling
     runtime: docker
-    dockerfilePath: ./backend/Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: .
     envVars:
       - key: NODE_ENV
