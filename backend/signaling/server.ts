@@ -10,11 +10,11 @@ import { randomUUID } from "crypto";
 import { getToken } from "next-auth/jwt";
 
 import { createRouter } from "../app/mediasoup/router";
-import { createTransport } from "@/app/mediasoup/transport";
-import { createWebRTCServer } from "@/app/mediasoup/webrtc";
+import { createTransport } from "../app/mediasoup/transport";
+import { createWebRTCServer } from "../app/mediasoup/webrtc";
 
-import { prisma } from "@/lib/prisma";
-import { redis } from "@/lib/redis";
+import { prisma } from "../lib/prisma";
+import { redis } from "../lib/redis";
 
 import { Peer } from "./types/types";
 
