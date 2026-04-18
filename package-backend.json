@@ -4,8 +4,8 @@
   "description": "VideoConff WebSocket Signaling Server",
   "main": "signaling/server.js",
   "scripts": {
-    "start": "node signaling/server.js",
-    "build": "tsc signaling/server.ts --outDir dist"
+    "start": "npm run build && node dist/signaling/server.js",
+    "build": "npx prisma generate && tsc signaling/server.ts --outDir dist --target es2020 --module commonjs --esModuleInterop --skipLibCheck"
   },
   "dependencies": {
     "express": "^5.2.1",
@@ -16,10 +16,16 @@
     "jsonwebtoken": "^9.0.3",
     "dotenv": "^17.3.1",
     "body-parser": "^1.20.2",
-    "crypto": "^1.0.1"
+    "crypto": "^1.0.1",
+    "next-auth": "^4.24.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.5.10",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/body-parser": "^1.19.5",
+    "typescript": "^5.0.0",
+    "prisma": "^5.22.0"
   }
 }
