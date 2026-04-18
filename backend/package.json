@@ -4,7 +4,8 @@
   "description": "VideoConff WebSocket Signaling Server",
   "main": "dist/signaling/server.js",
   "scripts": {
-    "build": "tsc && npx prisma generate",
+    "build": "tsc",
+    "postinstall": "prisma generate",
     "start": "node dist/signaling/server.js",
     "dev": "ts-node signaling/server.ts"
   },
