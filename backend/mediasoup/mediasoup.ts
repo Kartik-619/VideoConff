@@ -9,12 +9,14 @@ import type { RtpCodecCapability } from "mediasoup/types";
 //
 let workerType: mediasoup.types.Worker;
 let rtpParams: mediasoup.types.RtpParameters;
+let rtpCapabilities: any;
 
 //asks whaat codecs the machines supports
-const rtpCapabilities = await mediasoup.getSupportedRtpCapabilities();
+async function initRtpCapabilities() {
+  rtpCapabilities = await mediasoup.getSupportedRtpCapabilities();
+}
 
-
-
+initRtpCapabilities();
 
 //These are the only codecs allowed inside this SFU room.
 
