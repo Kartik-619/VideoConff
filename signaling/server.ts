@@ -21,6 +21,15 @@ import { Peer } from "./types/types";
 const app = express();
 app.use(bodyParser.json());
 
+// Health check endpoint for Render
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'OK', 
+    service: 'videoconff-signaling',
+    timestamp: new Date().toISOString()
+  });
+});
+
 const rooms = new Map<string, any>();
 
 /* ---------------- LOBBY BROADCAST ---------------- */

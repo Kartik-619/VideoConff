@@ -8,5 +8,5 @@ services:
       - key: NODE_ENV
         value: production
     healthCheck:
-      path: /health
+      path: /api/health
     plan: free
