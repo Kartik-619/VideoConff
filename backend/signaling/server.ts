@@ -20,6 +20,11 @@ import { Peer } from "./types/types";
 const app = express();
 app.use(bodyParser.json());
 
+// Root endpoint to test backend
+app.get('/', (req, res) => {
+  res.send("Backend running");
+});
+
 // Health check endpoint for Render
 app.get('/api/health', (req, res) => {
   res.status(200).json({ 
