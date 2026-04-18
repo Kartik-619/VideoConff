@@ -109,8 +109,9 @@ app.post("/startMeeting", async (req, res) => {
 async function startServer() {
   const webRtcServer = await createWebRTCServer();
 
-  const server = app.listen(8080, () => {
-    console.log("WS Server running on 8080");
+  const PORT = process.env.PORT || 8080;
+  const server = app.listen(PORT, () => {
+    console.log(`WS Server running on ${PORT}`);
   });
 
   const wss = new WebSocketServer({ server });

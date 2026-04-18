@@ -1,6 +1,6 @@
 FROM node:20
 
-# Install build tools needed for mediasoup worker compilation
+# Install build tools for mediasoup
 RUN apt-get update && apt-get install -y \
   python3 \
   make \
@@ -10,20 +10,23 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy package files first for better caching
+# Copy package.json first (for caching)
 COPY backend/package*.json ./
 
-# Install dependencies
+# Install dependencies (this compiles mediasoup worker)
 RUN npm install
 
-# Copy source code
+# Copy rest of backend
 COPY backend/ .
 
-# Generate Prisma client and compile TypeScript
-RUN npx prisma generate && npm run build
+# Build TypeScript
+RUN npm run build
+
+# Generate Prisma client (safe way)
+RUN ./node_modules/.bin/prisma generate
 
 # Expose port
 EXPOSE 8080
 
-# Start the server
+# Start server
 CMD ["node", "dist/signaling/server.js"]
