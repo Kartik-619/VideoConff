@@ -4,8 +4,8 @@
   "description": "VideoConff WebSocket Signaling Server",
   "main": "signaling/server.js",
   "scripts": {
-    "start": "node signaling/server.js",
-    "build": "tsc signaling/server.ts --outDir dist"
+    "start": "npm run build && node signaling/server.js",
+    "build": "tsc signaling/server.ts --outDir ."
   },
   "dependencies": {
     "express": "^5.2.1",
