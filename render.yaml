@@ -2,8 +2,9 @@ services:
   - type: web
     name: videoconff-signaling
     runtime: node
-    buildCommand: cp package-backend.json package.json && npm install && npx prisma generate
-    startCommand: node signaling/server.js
+    rootDir: backend
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production

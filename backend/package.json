@@ -1,0 +1,32 @@
+{
+  "name": "videoconff-backend",
+  "version": "1.0.0",
+  "description": "VideoConff WebSocket Signaling Server",
+  "main": "dist/signaling/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && npx prisma generate && node dist/signaling/server.js",
+    "dev": "ts-node signaling/server.ts"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "ws": "^8.19.0",
+    "mediasoup": "^3.19.17",
+    "ioredis": "^5.9.2",
+    "@prisma/client": "^5.22.0",
+    "jsonwebtoken": "^9.0.3",
+    "dotenv": "^17.3.1",
+    "bcrypt": "^6.0.0",
+    "axios": "^1.13.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.34",
+    "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.1",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/bcrypt": "^6.0.0",
+    "typescript": "^5.9.3",
+    "prisma": "^5.22.0",
+    "ts-node": "^10.9.2"
+  }
+}
