@@ -1,22 +1,21 @@
-import dotenv from "dotenv";
+const dotenv = require("dotenv");
 dotenv.config();
 
-import jwt from "jsonwebtoken";
+const jwt = require("jsonwebtoken");
+const express = require("express");
+const bodyParser = require("body-parser");
+const { WebSocketServer, WebSocket } = require("ws");
+const { randomUUID } = require("crypto");
+const { getToken } = require("next-auth/jwt");
 
-import express from "express";
-import bodyParser from "body-parser";
-import { WebSocketServer, WebSocket } from "ws";
-import { randomUUID } from "crypto";
-import { getToken } from "next-auth/jwt";
+const { createRouter } = require("../app/mediasoup/router");
+const { createTransport } = require("../app/mediasoup/transport");
+const { createWebRTCServer } = require("../app/mediasoup/webrtc");
 
-import { createRouter } from "../app/mediasoup/router";
-import { createTransport } from "../app/mediasoup/transport";
-import { createWebRTCServer } from "../app/mediasoup/webrtc";
+const { prisma } = require("../lib/prisma");
+const { redis } = require("../lib/redis");
 
-import { prisma } from "../lib/prisma";
-import { redis } from "../lib/redis";
-
-import { Peer } from "./types/types";
+const { Peer } = require("./types/types");
 
 const app = express();
 app.use(bodyParser.json());
