@@ -451,7 +451,6 @@ audioProducerRef.current = audioProducer;
 
         } else {
 
-<<<<<<< HEAD
           // prevent duplicate recv transport
           if (recvTransportRef.current) return;
        
@@ -472,15 +471,6 @@ audioProducerRef.current = audioProducer;
               processPendingProducers();
             });
           
-            ws.send(JSON.stringify({
-              type: "connectTransport",
-              requestId,
-              transportId: transport.id,
-              dtlsParameters
-            }));
-          });
-          
->>>>>>> 4fe71d9e948b9865cc9c68fd85ae408959d1a447
             ws.send(JSON.stringify({
               type: "connectTransport",
               requestId,
@@ -649,7 +639,7 @@ audioProducerRef.current = audioProducer;
       wsRef.current = null;
     };
   
-  }, []
+  }, []);
 
   function cleanupAndExit() {
 

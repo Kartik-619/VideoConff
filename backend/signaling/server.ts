@@ -371,7 +371,16 @@ async function startServer() {
 
         if (data.type === "connectTransport") {
           const transport = rooms.get(roomId!)?.peers.get(peerId!)?.transports.get(data.transportId);
-          if (transport) await transport.connect({ dtlsParameters: data.dtlsParameters });
+          if (!transport) return;
+          
+          await transport.connect({ dtlsParameters: data.dtlsParameters });
+          
+          if (data.requestId) {
+            const peer = rooms.get(roomId!)?.peers.get(peerId!);
+            if (peer) {
+              safeSend(peer.socket, { type: "transportConnected", requestId: data.requestId });
+            }
+          }
         }
 
         if (data.type === "producer") {
@@ -404,33 +413,15 @@ async function startServer() {
                 kind: producer.kind,
                 userId: peer.userId,
               },
-            })
-          );
-        });
-
-        setTimeout(() => {
-  room.peers.forEach((p: any, id: string) => {
-    if (id === peerId) return;
-
-    p.socket.send(
-      JSON.stringify({
-        type: "producer",
-        data: {
-          producerId: producer.id,
-          peerId,
-          kind: producer.kind,
-          userId: peer.userId,
-        },
-      })
-    );
-  });
-}, 300);
-      }
+            });
+          });
+        }
 
       
 
       /* ---------------- CONSUMER ---------------- */
       if (data.type === "consumer") {
+        if (!roomId || !peerId) return;
         const room = rooms.get(roomId);
         const peer = room?.peers.get(peerId);
         if (!room || !peer) return;
@@ -460,7 +451,8 @@ async function startServer() {
         }
 
         if (data.type === "resumeConsumer") {
-          const peer = rooms.get(roomId!)?.peers.get(peerId!);
+          if (!roomId || !peerId) return;
+          const peer = rooms.get(roomId)?.peers.get(peerId);
           const consumer = peer?.consumers.get(data.consumerId);
           if (consumer) {
             await consumer.resume();
