@@ -321,7 +321,6 @@ audioProducerRef.current = audioProducer;
       if (data.type === "joined") {
         socketIdRef.current = data.peerId;
         setRemoteStreams(new Map());
-        producerPeerMap.current.clear();
         producedRef.current = false;
         reconnectAttempts.current = 0;
 
@@ -393,11 +392,6 @@ audioProducerRef.current = audioProducer;
 
           transport = device.createRecvTransport(data.data)
           recvTransportRef.current = transport
-          ws.send(JSON.stringify({
-            type: "syncProducers"
-          }));
-          // ✅ process immediately
-          processPendingProducers();
 
           transport.on("connect", ({ dtlsParameters }, cb) => {
 
@@ -409,34 +403,8 @@ audioProducerRef.current = audioProducer;
 
             cb()
 
-            // ✅ safety replay (if anything missed)
-            processPendingProducers();
-
-            
-          // 🔥 Process queued producers
-          pendingProducers.current.forEach((data) => {
-            const device = deviceRef.current;
-            const transport = recvTransportRef.current;
-
-            if (!device || !transport) return;
-
-            producerPeerMap.current.set(
-              data.data.producerId,
-              data.data.peerId
-            );
-
-            wsRef.current?.send(
-              JSON.stringify({
-                type: "consumer",
-                producerId: data.data.producerId,
-                transportId: transport.id,
-                rtpCapabilities: device.rtpCapabilities,
-              })
-            );
-          });
-
-          // clear queue after processing
-          pendingProducers.current = [];
+            // Process any producers that arrived before transport was ready
+            processPendingProducers()
 
           })
         }
@@ -549,6 +517,10 @@ audioProducerRef.current = audioProducer;
     startedRef.current = true
     connectWebSocket()
 
+    return () => {
+      wsRef.current?.close()
+      wsRef.current = null
+    }
   }, [meetingId, session?.user?.id])
 
   function cleanupAndExit() {

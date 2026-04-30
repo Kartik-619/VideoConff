@@ -426,24 +426,6 @@ if (data.type === "chatMessage") {
             })
           );
         });
-
-        setTimeout(() => {
-  room.peers.forEach((p: any, id: string) => {
-    if (id === peerId) return;
-
-    p.socket.send(
-      JSON.stringify({
-        type: "producer",
-        data: {
-          producerId: producer.id,
-          peerId,
-          kind: producer.kind,
-          userId: peer.userId,
-        },
-      })
-    );
-  });
-}, 300);
       }
 
       
