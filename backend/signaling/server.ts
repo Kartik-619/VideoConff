@@ -426,29 +426,29 @@ async function startServer() {
         const peer = room?.peers.get(peerId);
         if (!room || !peer) return;
 
-          const transport = peer.transports.get(data.transportId);
-          if (!transport) return;
+        const transport = peer.transports.get(data.transportId);
+        if (!transport) return;
 
-          if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) return;
+        if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) return;
 
-          const consumer = await transport.consume({
+        const consumer = await transport.consume({
+          producerId: data.producerId,
+          rtpCapabilities: data.rtpCapabilities,
+          paused: true,
+        });
+
+        peer.consumers.set(consumer.id, consumer);
+
+        safeSend(ws, {
+          type: "consumerCreated",
+          data: {
+            id: consumer.id,
             producerId: data.producerId,
-            rtpCapabilities: data.rtpCapabilities,
-            paused: true,
-          });
-
-          peer.consumers.set(consumer.id, consumer);
-
-          safeSend(ws, {
-            type: "consumerCreated",
-            data: {
-              id: consumer.id,
-              producerId: data.producerId,
-              kind: consumer.kind,
-              rtpParameters: consumer.rtpParameters,
-            },
-          });
-        }
+            kind: consumer.kind,
+            rtpParameters: consumer.rtpParameters,
+          },
+        });
+      }
 
         if (data.type === "resumeConsumer") {
           if (!roomId || !peerId) return;
