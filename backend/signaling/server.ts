@@ -312,18 +312,21 @@ async function startServer() {
         }
 
         if (data.type === "syncProducers") {
-          const room = rooms.get(roomId!);
+          if (!roomId || !peerId) return;
+          const room = rooms.get(roomId);
           if (!room) return;
 
+          console.log(`[syncProducers] Peer ${peerId} requesting existing producers`);
           room.peers.forEach((otherPeer, otherId) => {
             if (otherId === peerId) return;
-            otherPeer.producers.forEach((producer: any) => {
+            otherPeer.producers.forEach((prod: any) => {
+              console.log(`[syncProducers] Sending producer ${prod.id} to ${peerId}`);
               safeSend(ws, {
                 type: "producer",
                 data: {
-                  producerId: producer.id,
+                  producerId: prod.id,
                   peerId: otherId,
-                  kind: producer.kind,
+                  kind: prod.kind,
                   userId: otherPeer.userId,
                 },
               });
@@ -403,6 +406,7 @@ async function startServer() {
 
           safeSend(ws, { type: "produced", data: { producerId: producer.id } });
 
+          // Notify ALL other peers about this new producer
           room.peers.forEach((p, id) => {
             if (id === peerId) return;
             safeSend(p.socket, {

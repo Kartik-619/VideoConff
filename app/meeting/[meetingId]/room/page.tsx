@@ -450,25 +450,22 @@ audioProducerRef.current = audioProducer;
           startProducing(transport)
 
         } else {
-
+ 
           // prevent duplicate recv transport
           if (recvTransportRef.current) return;
        
           transport = device.createRecvTransport(data.data);
           recvTransportRef.current = transport;
           
-          ws.send(JSON.stringify({
-            type: "syncProducers"
-          }));
-          
-          processPendingProducers();
-          
           transport.on("connect", ({ dtlsParameters }, cb, errback) => {
             const requestId = crypto.randomUUID();
           
             pendingCallbacks.current.set(requestId, () => {
               cb();
-              processPendingProducers();
+              // After recv transport connected, sync producers
+              ws.send(JSON.stringify({
+                type: "syncProducers"
+              }));
             });
           
             ws.send(JSON.stringify({
