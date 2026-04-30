@@ -1,0 +1,1 @@
+{"version":3,"file":"transport.js","sourceRoot":"","sources":["../../mediasoup/transport.ts"],"names":[],"mappings":";;;AAEA,oGAAoG;AACpG,+JAA+J;AAExJ,MAAM,eAAe,GAAG,KAAK;AAClC,+DAA+D;AAC/D,MAA8B,EAC9B,YAA0C,EACA,EAAE;IAC5C,OAAO,MAAM,MAAM,CAAC,qBAAqB,CAAC;QACxC,YAAY;QACZ,SAAS,EAAE,IAAI;QACf,SAAS,EAAE,IAAI;QACf,SAAS,EAAE,IAAI;KAChB,CAAC,CAAC;AACL,CAAC,CAAC;AAXW,QAAA,eAAe,mBAW1B"}
