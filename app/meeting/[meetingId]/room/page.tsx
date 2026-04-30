@@ -33,6 +33,9 @@ export default function MeetingRoom() {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
 
+
+  const consumedProducersRef = useRef<Set<string>>(new Set());
+
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const deviceRef = useRef<mediasoupClient.Device | null>(null)
 
@@ -52,8 +55,11 @@ export default function MeetingRoom() {
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
   const screenTrackRef = useRef<MediaStreamTrack | null>(null)
-
-  const [remoteStreams, setRemoteStreams] =
+  const pendingCallbacks = useRef<
+  Map<string,(arg?: any)=>void>
+ >(new Map());
+ 
+ const [remoteStreams, setRemoteStreams] =
     useState<Map<string, MediaStream>>(new Map())
 
   const [activeSpeaker, setActiveSpeaker] =
@@ -66,6 +72,8 @@ export default function MeetingRoom() {
   const [cameraOff, setCameraOff] = useState(false)
   const meetingEndedRef = useRef(false);
 
+  const [hostId,setHostId] = useState<string | null>(null);
+
   const [chatOpen, setChatOpen] = useState(false);
 
   const [screenSharing, setScreenSharing] = useState(false)
@@ -75,9 +83,17 @@ export default function MeetingRoom() {
   const [participants, setParticipants] = useState(0);
 
   const [messages, setMessages] = useState<any[]>([]);
+  const joinSentRef = useRef(false);
 
   const allStreams = useMemo(() => {
-  const result: { id: string; stream: MediaStream; isLocal: boolean }[] = [];
+  const result: { 
+    id: string; 
+    stream: MediaStream; 
+    isLocal: boolean;
+    userName?: string;
+    userImage?: string;
+    isVideoOff?: boolean;
+  }[] = [];
 
  
 
@@ -86,7 +102,10 @@ export default function MeetingRoom() {
     result.push({
       id: "local",
       stream: localStream,
-      isLocal: true
+      isLocal: true,
+      userName: session?.user?.name || undefined,
+      userImage: session?.user?.image || undefined,
+      isVideoOff: cameraOff
     });
   }
 
@@ -96,12 +115,15 @@ export default function MeetingRoom() {
     result.push({
       id: peerId,
       stream,
-      isLocal: false
+      isLocal: false,
+      userName: `User ${peerId.slice(0, 6)}`, // Fallback for remote users
+      userImage: undefined,
+      isVideoOff: false // We'll need to track remote video state separately
     });
   });
 
   return result;
-}, [localStream, remoteStreams]);
+}, [localStream, remoteStreams, cameraOff, session?.user]);
 
 
 
@@ -185,12 +207,19 @@ audioProducerRef.current = audioProducer;
       const transport = sendTransportRef.current
       if (!transport) return
 
-      await transport.produce({ track })
-
-      screenTrackRef.current = track
-      setScreenSharing(true)
-
-      track.onended = () => setScreenSharing(false)
+      const screenProducer = await transport.produce({
+        track
+      });
+      
+      screenTrackRef.current = track;
+      setScreenSharing(true);
+      
+      track.onended = () => {
+        screenProducer.close();
+        track.stop();
+        screenTrackRef.current = null;
+        setScreenSharing(false);
+      };
 
     } catch (err) {
       console.error(err)
@@ -210,54 +239,65 @@ audioProducerRef.current = audioProducer;
   }
 
   function processPendingProducers() {
-  const device = deviceRef.current;
-  const transport = recvTransportRef.current;
+    const device = deviceRef.current;
+    const transport = recvTransportRef.current;
+  
+    if (!device || !transport) return;
+  
+    pendingProducers.current.forEach((producerData) => {
+      producerPeerMap.current.set(
+        producerData.data.producerId,
+        producerData.data.peerId
+      );
+  
+      wsRef.current?.send(
+        JSON.stringify({
+          type: "consumer",
+          producerId: producerData.data.producerId,
+          transportId: transport.id,
+          rtpCapabilities: device.rtpCapabilities,
+        })
+      );
+    });
+  
+    pendingProducers.current = [];
+  }
 
-  if (!device || !transport) return;
-
-  pendingProducers.current.forEach((data) => {
-    producerPeerMap.current.set(
-      data.data.producerId,
-      data.data.peerId
-    );
-
-    wsRef.current?.send(
-      JSON.stringify({
-        type: "consumer",
-        producerId: data.data.producerId,
-        transportId: transport.id,
-        rtpCapabilities: device.rtpCapabilities,
-      })
-    );
-  });
-
-  pendingProducers.current = [];
-}
-
+  const connectingRef=useRef(false);
 
   async function connectWebSocket() {
-    if (wsRef.current) return;
+    if (
+      connectingRef.current ||
+      wsRef.current?.readyState === WebSocket.OPEN ||
+      wsRef.current?.readyState === WebSocket.CONNECTING
+     ){
+      return;
+     }
+    connectingRef.current=true;
 
     const res = await fetch("/api/ws-token");
     if (!res.ok) {
       console.error("Failed to get WS token");
+      connectingRef.current = false;
       return;
     }
 
     const { token } = await res.json();
     
-    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https://', 'wss://').replace('http://', 'ws://') || 'ws://localhost:8080'}?token=${token}`);
+    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https', 'wss').replace('http', 'ws') || 'ws://localhost:8080'}?token=${token}`);
     wsRef.current = ws;
+    joinSentRef.current = false;
 
     ws.onopen = () => {
 
-      setConnectionStatus("Connected");
+      if (joinSentRef.current) return;
+      joinSentRef.current = true;
 
       ws.send(JSON.stringify({
-        type: "join",
+        type:"join",
         roomId: meetingId
       }));
-    };
+      };
 
     ws.onmessage = async (e) => {
 
@@ -296,118 +336,187 @@ audioProducerRef.current = audioProducer;
 
       if (data.type === "producerClosed") {
         const producerId = data.producerId;
-
+      
+        // remove producer from dedupe set
+        consumedProducersRef.current.delete(producerId);
+      
         setRemoteStreams((prev) => {
           const updated = new Map(prev);
-
+      
           const peerId = producerPeerMap.current.get(producerId);
-
-          // remove mapping
+      
+          // remove producer -> peer mapping
           producerPeerMap.current.delete(producerId);
-
+      
           if (!peerId) return prev;
-
+      
           const stream = updated.get(peerId);
-
+      
           if (stream) {
-            stream.getTracks().forEach((track) => track.stop());
+            stream.getTracks().forEach(track => track.stop());
             updated.delete(peerId);
           }
-
+      
           return updated;
         });
       }
 
       if (data.type === "joined") {
         socketIdRef.current = data.peerId;
+        setHostId(data.hostId);
+      deviceRef.current=null;
         setRemoteStreams(new Map());
+        producerPeerMap.current.clear();
+        consumedProducersRef.current.clear(); // add
+        pendingProducers.current = [];        // add
+        pendingCallbacks.current.clear();     // add
         producedRef.current = false;
         reconnectAttempts.current = 0;
-
+      
         ws.send(JSON.stringify({
-         type: "getParticipants"
-       }));
+          type: "getParticipants"
+        }));
       }
 
       if (data.type === "rtpCapabilities") {
 
-        const device = new mediasoupClient.Device()
-
+        if (deviceRef.current) return; // add
+      
+        const device = new mediasoupClient.Device();
+      
         await device.load({
           routerRtpCapabilities: data.data
-        })
-
-        deviceRef.current = device
-
-        ws.send(JSON.stringify({ type: "createTransport", direction: "send" }))
-        ws.send(JSON.stringify({ type: "createTransport", direction: "recv" }))
+        });
+      
+        deviceRef.current = device;
+      
+        ws.send(JSON.stringify({
+          type:"createTransport",
+          direction:"send"
+        }));
+      
+        ws.send(JSON.stringify({
+          type:"createTransport",
+          direction:"recv"
+        }));
       }
 
       if (data.type === "transportCreated") {
 
-        const device = deviceRef.current
-        if (!device) return
-
-        let transport: mediasoupTypes.Transport
-
+        const device = deviceRef.current;
+        if (!device) return;
+      
+        let transport: mediasoupTypes.Transport;
+      
         if (data.data.direction === "send") {
+      
+          // prevent duplicate send transport
+          if (sendTransportRef.current) return;
+      
+          transport = device.createSendTransport(data.data);
+          sendTransportRef.current = transport;
 
-          transport = device.createSendTransport(data.data)
-          sendTransportRef.current = transport
-
-          transport.on("connect", ({ dtlsParameters }, cb) => {
-            ws.send(JSON.stringify({
-              type: "connectTransport",
-              transportId: transport.id,
-              dtlsParameters
-            }))
-            cb()
-          })
+          transport.on("connect", ({ dtlsParameters }, cb, errback) => {
+            try{
+              const requestId = crypto.randomUUID();
+          
+              pendingCallbacks.current.set(requestId, cb);
+          
+              ws.send(JSON.stringify({
+                type:"connectTransport",
+                requestId,
+                transportId: transport.id,
+                dtlsParameters
+              }));
+            } catch(e){
+              errback(e as Error);
+            }
+          });
 
           transport.on("produce", (p, cb) => {
 
+            const requestId = crypto.randomUUID();
+          
+            pendingCallbacks.current.set(requestId, cb);
+          
             ws.send(JSON.stringify({
-              type: "producer",
+              type:"producer",
+              requestId,
               transportId: transport.id,
               kind: p.kind,
               rtpParameters: p.rtpParameters
-            }))
-
-            const handler = (e: MessageEvent) => {
-
-              const res = JSON.parse(e.data)
-
-              if (res.type === "produced") {
-                cb({ id: res.data.producerId })
-                ws.removeEventListener("message", handler)
-              }
-            }
-
-            ws.addEventListener("message", handler)
-          })
-
+            }));
+          });
           startProducing(transport)
 
         } else {
 
-          transport = device.createRecvTransport(data.data)
-          recvTransportRef.current = transport
-
-          transport.on("connect", ({ dtlsParameters }, cb) => {
-
+<<<<<<< HEAD
+          // prevent duplicate recv transport
+          if (recvTransportRef.current) return;
+       
+          transport = device.createRecvTransport(data.data);
+          recvTransportRef.current = transport;
+          
+          ws.send(JSON.stringify({
+            type: "syncProducers"
+          }));
+          
+          processPendingProducers();
+          
+          transport.on("connect", ({ dtlsParameters }, cb, errback) => {
+            const requestId = crypto.randomUUID();
+          
+            pendingCallbacks.current.set(requestId, () => {
+              cb();
+              processPendingProducers();
+            });
+          
             ws.send(JSON.stringify({
               type: "connectTransport",
+              requestId,
               transportId: transport.id,
               dtlsParameters
-            }))
-
-            cb()
-
-            // Process any producers that arrived before transport was ready
-            processPendingProducers()
-
-          })
+            }));
+          });
+          
+>>>>>>> 4fe71d9e948b9865cc9c68fd85ae408959d1a447
+            ws.send(JSON.stringify({
+              type: "connectTransport",
+              requestId,
+              transportId: transport.id,
+              dtlsParameters
+            }));
+          });
         }
+      }
+
+      if (data.type === "produced") {
+
+        const cb = pendingCallbacks.current.get(data.requestId);
+      
+        if (cb) {
+          cb({
+            id: data.producerId
+          });
+      
+          pendingCallbacks.current.delete(data.requestId);
+        }
+      
+        return;
+      }
+
+
+      if (data.type === "transportConnected") {
+
+        const cb = pendingCallbacks.current.get(data.requestId);
+      
+        if (cb) {
+          cb();
+          pendingCallbacks.current.delete(data.requestId);
+        }
+      
+        return;
       }
 
       if (data.type === "producer") {
@@ -415,6 +524,10 @@ audioProducerRef.current = audioProducer;
         // ignore self producer by userId
         if (socketIdRef.current && data.data.peerId === socketIdRef.current) return;
 
+        if (consumedProducersRef.current.has(data.data.producerId)) return;
+
+        consumedProducersRef.current.add(data.data.producerId);
+        
         const transport = recvTransportRef.current;
         const device = deviceRef.current;
 
@@ -450,6 +563,10 @@ audioProducerRef.current = audioProducer;
 
         try {
           const consumer = await transport.consume(data.data);
+
+          consumer.on("transportclose", () => {
+            consumer.close();
+          });
 
           setRemoteStreams(prev => {
 
@@ -506,22 +623,33 @@ audioProducerRef.current = audioProducer;
 
       setConnectionStatus("Disconnected");
       wsRef.current = null;
+      connectingRef.current=false;
     }
+
+    ws.onerror = (e) => {
+      console.error("WebSocket error:", e);
+      setConnectionStatus("Error");
+    };
+  
   }
+
+  const joinedRef = useRef(false);
 
   useEffect(() => {
 
-    if (!meetingId) return
-    if (!session?.user?.id) return
+    if (!meetingId || !session?.user?.id) return;
 
-    startedRef.current = true
-    connectWebSocket()
-
+    if (startedRef.current) return; // prevents strict mode double mount
+    startedRef.current = true;
+  
+    connectWebSocket();
+  
     return () => {
-      wsRef.current?.close()
-      wsRef.current = null
-    }
-  }, [meetingId, session?.user?.id])
+      wsRef.current?.close();
+      wsRef.current = null;
+    };
+  
+  }, []
 
   function cleanupAndExit() {
 
@@ -532,11 +660,6 @@ audioProducerRef.current = audioProducer;
     localStream.getTracks().forEach(track => track.stop());
     setLocalStream(null);
   }
-
-  // 🔥 release camera
-  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    .then(stream => stream.getTracks().forEach(track => track.stop()))
-    .catch(() => {});
 
   // 🔥 stop screen share
   if (screenTrackRef.current) {
@@ -560,13 +683,23 @@ audioProducerRef.current = audioProducer;
   }
 
   // 🔥 close transports safely
-  if (sendTransportRef.current && !sendTransportRef.current.closed) {
-    sendTransportRef.current.close();
+  try {
+    if (sendTransportRef.current && !sendTransportRef.current.closed) {
+      sendTransportRef.current.close();
+    }
+  } catch (e) {
+    console.warn("send transport already closing");
+  } finally {
     sendTransportRef.current = null;
   }
-
-  if (recvTransportRef.current && !recvTransportRef.current.closed) {
-    recvTransportRef.current.close();
+  
+  try {
+    if (recvTransportRef.current && !recvTransportRef.current.closed) {
+      recvTransportRef.current.close();
+    }
+  } catch (e) {
+    console.warn("recv transport already closing");
+  } finally {
     recvTransportRef.current = null;
   }
 
@@ -576,11 +709,20 @@ audioProducerRef.current = audioProducer;
 
   setRemoteStreams(new Map());
 
-  startedRef.current = false;
+producerPeerMap.current.clear();
+consumedProducersRef.current.clear();
+pendingProducers.current = [];
+pendingCallbacks.current.clear();
 
-  meetingEndedRef.current = true;
+deviceRef.current = null;
 
-  router.replace("/");
+producedRef.current = false;
+connectingRef.current = false;
+
+startedRef.current = false;
+meetingEndedRef.current = true;
+
+router.replace("/");
 }
 
   return (
@@ -594,16 +736,19 @@ audioProducerRef.current = audioProducer;
       </div>
 
       <LayoutCall count={allStreams.length}>
-        {allStreams.map(({ id, stream, isLocal }) => {
+        {allStreams.map(({ id, stream, isLocal, userName, userImage, isVideoOff }) => {
           const hasVideo = stream.getVideoTracks().length > 0;
 
-          if (!hasVideo) return null;
-
+          // Always show VideoTile, even without video tracks (for avatar display)
           return (
             <VideoTile
               key={id}
               stream={stream}
               muted={isLocal}
+              isVideoOff={isVideoOff || !hasVideo}
+              userName={userName}
+              userImage={userImage}
+              isLocal={isLocal}
             />
           );
         })}
@@ -715,21 +860,17 @@ audioProducerRef.current = audioProducer;
         </button>
 
         <button
-          onClick={() => {
-            if (!videoProducerRef.current) return;
+  onClick={() => {
+    const track = localStream?.getVideoTracks()[0];
+    if (!track) return;
 
-            if (videoProducerRef.current.paused) {
-              videoProducerRef.current.resume(); // ON
-              setCameraOff(false);
-            } else {
-              videoProducerRef.current.pause(); // OFF
-              setCameraOff(true);
-            }
-          }}
-          className="bg-gray-700 p-3 rounded-full text-white"
-        >
-          {cameraOff ? <FaVideoSlash /> : <FaVideo />}
-        </button>
+    track.enabled = !track.enabled;
+    setCameraOff(!track.enabled);
+  }}
+  className="bg-gray-700 p-3 rounded-full text-white"
+>
+  {cameraOff ? <FaVideoSlash /> : <FaVideo />}
+</button>
 
         <button
           onClick={() => setChatOpen(prev => !prev)}
@@ -749,16 +890,25 @@ audioProducerRef.current = audioProducer;
 
         <button
           onClick={async () => {
-
             try {
-              await fetch("/api/meeting/end", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ meetingId }),
-              });
-            } catch (e) {
+          
+              // only host should end room
+              if (session?.user?.id === hostId) {
+                await fetch("/api/meeting/end", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type":"application/json"
+                  },
+                  body: JSON.stringify({
+                    meetingId
+                  })
+                });
+              }
+          
+            } catch(e) {
               console.error(e);
             }
+          
             cleanupAndExit();
           }}
           className="bg-red-600 p-3 rounded-full text-white"

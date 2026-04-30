@@ -18,197 +18,131 @@ type MeetingData = {
 
 export default function MeetingLobby() {
   const params = useParams();
-  const meetingId = params.meetingId as string;
   const router = useRouter();
   const { data: session } = useSession();
 
+  const meetingIdRef = useRef((params.meetingId as string) ?? '');
   const [meeting, setMeeting] = useState<MeetingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [starting, setStarting] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const joinedWSRef = useRef(false);
 
+  const wsRef = useRef<WebSocket | null>(null);
+  const joinSentRef = useRef(false);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const teardownRef = useRef(false);
   const connectingRef = useRef(false);
 
   const inviteLink =
     typeof window !== "undefined"
-      ? `${window.location.origin}/meeting/${meetingId}`
+      ? `${window.location.origin}/meeting/${meetingIdRef.current}`
       : "";
 
-  const fetchMeeting = async () => {
-    try {
-      const res = await fetch(`/api/meeting/${meetingId}`);
-      if (!res.ok) {
-        setLoading(false);
-        return;
-      }
-
-      const data = await res.json();
-      setMeeting(data);
-
-      if (data.status === "LIVE") {
-        router.replace(`/meeting/${meetingId}/room`);
-      }
-
-      if (data.status === "ENDED") {
-        toast.error("Meeting has ended");
-        router.replace("/");
-      }
-
-    } catch {
-      console.log("Polling error");
-    } finally {
-      setLoading(false);
+  const closeWS = () => {
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.close();
+      wsRef.current = null;
     }
   };
 
-useEffect(() => {
-  if (!meetingId) return;
-  if (!session?.user?.id) return;
+  useEffect(() => {
+    const meetingId = meetingIdRef.current;
+    if (!meetingId || !session?.user?.id) return;
 
-  let ws: WebSocket | null = null;
-  let reconnectTimeout: NodeJS.Timeout | null = null;
+    teardownRef.current = false;
 
-  const connectWS = async () => {
-
-  // 🔥 prevent multiple connections
-  if (wsRef.current || connectingRef.current || joinedWSRef.current) return;
-
-  connectingRef.current = true;
-
-  if (!session?.user?.id) {
-    connectingRef.current = false;
-    return;
-  }
-
-  try {
-    const res = await fetch("/api/ws-token");
-
-    if (!res.ok) {
-      console.error("❌ Failed to fetch WS token");
-      connectingRef.current = false;
-      return;
-    }
-
-    const { token } = await res.json();
-
-    if (!token) {
-      console.error("❌ No token received");
-      connectingRef.current = false;
-      return;
-    }
-
-    console.log("✅ WS Token:", token);
-
-    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https://', 'wss://').replace('http://', 'ws://') || 'ws://localhost:8080'}?token=${token}`);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      console.log("WS connected");
-
-      connectingRef.current = false;
-
-      if (joinedWSRef.current) return;
-      joinedWSRef.current = true;
-
-      ws.send(JSON.stringify({
-        type: "join",
-        roomId: meetingId
-      }));
+    const fetchMeeting = async () => {
+      if (teardownRef.current) return;
+      try {
+        const res = await fetch(`/api/meeting/${meetingId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (teardownRef.current) return;
+        setMeeting(data);
+        setLoading(false);
+        if (data.status === "LIVE") router.replace(`/meeting/${meetingId}/room`);
+        if (data.status === "ENDED") {
+          toast.error("Meeting has ended");
+          router.replace("/");
+        }
+      } catch { /* ignore */ }
     };
 
-    ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
+    const connectWS = () => {
+      if (wsRef.current) return;
+      if (connectingRef.current) return;
+      if (teardownRef.current) return;
+      connectingRef.current = true;
 
-      if (data.type === "meetingStarted") {
+      fetch("/api/ws-token")
+        .then(r => r.json())
+        .then(({ token }: { token: string }) => {
+          if (!token || teardownRef.current) {
+            connectingRef.current = false;
+            return;
+          }
 
-        setTimeout(() => {
-          router.replace(`/meeting/${meetingId}/room`);
-        }, 300);
+          const ws = new WebSocket(
+            `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https://', 'wss://').replace('http://', 'ws://') || 'ws://localhost:8080'}?token=${token}`
+          );
+          wsRef.current = ws;
+          joinSentRef.current = false;
+          connectingRef.current = false;
 
-      }
-
-      if (data.type === "lobbyUpdate") {
-        setMeeting((prev) => {
-          if (!prev) return prev;
-
-          return {
-            ...prev,
-            participants: data.participants
+          ws.onopen = () => {
+            if (joinSentRef.current) return;
+            joinSentRef.current = true;
+            ws.send(JSON.stringify({ type: "join", roomId: meetingId }));
           };
+
+          ws.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.type === "meetingStarted") {
+              teardownRef.current = true;
+              closeWS();
+              setTimeout(() => router.replace(`/meeting/${meetingId}/room`), 300);
+            }
+            if (msg.type === "lobbyUpdate") {
+              setMeeting(prev => prev ? { ...prev, participants: msg.participants } : prev);
+            }
+            if (msg.type === "meetingEnded") {
+              toast.error("Meeting ended by host");
+              teardownRef.current = true;
+              closeWS();
+              router.replace("/");
+            }
+          };
+
+          ws.onclose = () => {
+            wsRef.current = null;
+            if (teardownRef.current) return;
+            if (!navigator.onLine) return;
+            reconnectTimerRef.current = setTimeout(connectWS, 2000);
+          };
+
+          ws.onerror = () => ws.close();
+        })
+        .catch(() => {
+          connectingRef.current = false;
         });
-
-        fetchMeeting();
-      }
-
-      if (data.type === "meetingEnded") {
-        toast.error("Meeting ended by host");
-        wsRef.current?.close();
-        router.replace("/");
-      }
     };
 
-    ws.onclose = () => {
+    fetchMeeting();
+    connectWS();
 
-      if (!navigator.onLine) return;
-      console.log("WS disconnected");
+    pollTimerRef.current = setInterval(fetchMeeting, 10000);
 
-      wsRef.current = null;
-      joinedWSRef.current = false;
-      connectingRef.current = false;
-
-      setTimeout(() => {
-        console.log("Reconnecting WS...");
-        connectWS();
-      }, 2000);
+    return () => {
+      teardownRef.current = true;
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      closeWS();
     };
-
-    ws.onerror = () => {
-      ws.close();
-    };
-
-  } catch (err) {
-    console.error(err);
-    connectingRef.current = false;
-  }
-};
-
-  // initial fetch
-  fetchMeeting();
-
-  // connect WS
-  connectWS();
-
-  return () => {
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout);
-  }
-
-  // 🔥 CLOSE WS when leaving lobby
-  wsRef.current?.close();
-  wsRef.current = null;
-  joinedWSRef.current = false;
-};
-
-
-}, [meetingId, session?.user?.id]);
-
-  const joinedRef = useRef(false);
- 
-    useEffect(() => {
-      if (!meeting?.meetingCode || !session?.user?.id) return;
-
-      if (joinedRef.current) return; // ✅ prevent multiple calls
-      joinedRef.current = true;
-
-      fetch("/api/meeting/join", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meetingCode: meeting.meetingCode }),
-      });
-    }, [meeting?.meetingCode, session]);
+  }, []);
 
   const handleCopyCode = async () => {
     if (!meeting) return;
@@ -236,12 +170,11 @@ useEffect(() => {
   const handleStartMeeting = async () => {
     if (starting) return;
     setStarting(true);
-
     try {
       await fetch('/api/meeting/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meetingId }),
+        body: JSON.stringify({ meetingId: meetingIdRef.current }),
       });
     } catch {
       setStarting(false);
@@ -249,93 +182,72 @@ useEffect(() => {
   };
 
   const handleLeave = async () => {
-    wsRef.current?.close();
+    teardownRef.current = true;
+    closeWS();
     await fetch('/api/meeting/leave', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ meetingId }),
+      body: JSON.stringify({ meetingId: meetingIdRef.current }),
     });
     router.replace('/');
   };
 
   const handleEnd = async () => {
     if (!isHost) return;
+    teardownRef.current = true;
+    closeWS();
     await fetch('/api/meeting/end', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ meetingId }),
+      body: JSON.stringify({ meetingId: meetingIdRef.current }),
     });
     router.replace('/');
   };
 
-  // ✅ CLEAN LOADING (NO HERO LANDING)
   if (loading) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100">
-      <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow-xl space-y-5 animate-pulse">
-
-        {/* Title */}
-        <div className="h-6 w-1/2 mx-auto rounded bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300"></div>
-
-        {/* Subtitle */}
-        <div className="h-4 w-3/4 mx-auto rounded bg-gray-200"></div>
-
-        {/* Participants list */}
-        <div className="space-y-3 mt-4">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="flex items-center justify-between p-3 rounded-xl bg-gray-100"
-            >
-              {/* Avatar */}
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-gray-300"></div>
-
-                {/* Name */}
-                <div className="h-4 w-24 rounded bg-gray-300"></div>
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100">
+        <div className="w-full max-w-md bg-white p-6 rounded-2xl shadow-xl space-y-5 animate-pulse">
+          <div className="h-6 w-1/2 mx-auto rounded bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300"></div>
+          <div className="h-4 w-3/4 mx-auto rounded bg-gray-200"></div>
+          <div className="space-y-3 mt-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gray-300"></div>
+                  <div className="h-4 w-24 rounded bg-gray-300"></div>
+                </div>
+                <div className="h-4 w-10 rounded bg-gray-300"></div>
               </div>
-
-              {/* Role badge */}
-              <div className="h-4 w-10 rounded bg-gray-300"></div>
-            </div>
-          ))}
+            ))}
+          </div>
+          <div className="flex gap-3 mt-4">
+            <div className="h-10 flex-1 rounded-xl bg-gray-300"></div>
+            <div className="h-10 flex-1 rounded-xl bg-gray-200"></div>
+          </div>
         </div>
-
-        {/* Buttons */}
-        <div className="flex gap-3 mt-4">
-          <div className="h-10 flex-1 rounded-xl bg-gray-300"></div>
-          <div className="h-10 flex-1 rounded-xl bg-gray-200"></div>
-        </div>
-
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   if (!meeting) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center text-white gap-4">
         <h1 className="text-2xl font-semibold">Meeting not found</h1>
-
-        <Button
-          variant="primary"
-          onClick={() => router.replace("/")}
-        >
+        <Button variant="primary" onClick={() => router.replace("/")}>
           Go Home
         </Button>
       </div>
     );
   }
 
-    const isHost =
-      session?.user?.id &&
-      meeting?.host?.id &&
-      session.user.id === meeting.host.id;
+  const isHost =
+    session?.user?.id &&
+    meeting?.host?.id &&
+    session.user.id === meeting.host.id;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
-
-      {/* ENHANCED CARD */}
       <div className="w-full max-w-2xl 
         bg-gradient-to-br from-white to-blue-50/80
         backdrop-blur-md 
@@ -354,18 +266,15 @@ useEffect(() => {
             : "Waiting for host to start the meeting..."}
         </p>
 
-        {/* CODE */}
         <div className="mt-8 text-center">
           <p className="text-gray-500 text-xs uppercase tracking-widest">
             Meeting Code
           </p>
-
           <div className="mt-3 py-4 bg-white rounded-xl border border-gray-200 shadow-sm text-gray-900 text-2xl font-mono tracking-widest">
             {meeting.meetingCode}
           </div>
         </div>
 
-        {/* BUTTONS */}
         <div className="mt-6 grid grid-cols-2 gap-4">
           <Button variant="secondary" onClick={handleCopyCode} full>
             <div className="flex items-center justify-center gap-2">
@@ -374,7 +283,6 @@ useEffect(() => {
             </div>
           </Button>
 
-          {/* BUTTON */}
           <Button
             variant="secondary"
             className="bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100 shadow-sm hover:shadow-md transition"
@@ -388,7 +296,6 @@ useEffect(() => {
           </Button>
         </div>
 
-        {/* BUTTON */}
         <div className="mt-3">
           <Button
             variant="secondary"
@@ -403,7 +310,6 @@ useEffect(() => {
           </Button>
         </div>
 
-        {/* PARTICIPANTS */}
         <div className="mt-10">
           <h2 className="text-gray-900 font-semibold mb-3 flex items-center gap-2">
             <Users size={18} />
@@ -418,13 +324,11 @@ useEffect(() => {
               >
                 <div className="flex items-center gap-2">
                   {user.name}
-
                   {meeting.host?.id === user.id && (
                     <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-0.5 rounded-md">
                       Host 👑
                     </span>
                   )}
-
                   {session?.user?.id === user.id && (
                     <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
                       You
@@ -436,9 +340,7 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* ACTIONS */}
         <div className="mt-10 space-y-4">
-
           {isHost && meeting.status !== "LIVE" && (
             <Button variant="primary" onClick={handleStartMeeting} disabled={starting} full>
               <div className="flex items-center justify-center gap-2">
@@ -467,7 +369,6 @@ useEffect(() => {
               </Button>
             )}
           </div>
-
         </div>
       </div>
     </div>
