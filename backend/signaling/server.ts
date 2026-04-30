@@ -312,21 +312,18 @@ async function startServer() {
         }
 
         if (data.type === "syncProducers") {
-          if (!roomId || !peerId) return;
-          const room = rooms.get(roomId);
+          const room = rooms.get(roomId!);
           if (!room) return;
 
-          console.log(`[syncProducers] Peer ${peerId} requesting existing producers`);
           room.peers.forEach((otherPeer, otherId) => {
             if (otherId === peerId) return;
-            otherPeer.producers.forEach((prod: any) => {
-              console.log(`[syncProducers] Sending producer ${prod.id} to ${peerId}`);
+            otherPeer.producers.forEach((producer: any) => {
               safeSend(ws, {
                 type: "producer",
                 data: {
-                  producerId: prod.id,
+                  producerId: producer.id,
                   peerId: otherId,
-                  kind: prod.kind,
+                  kind: producer.kind,
                   userId: otherPeer.userId,
                 },
               });
@@ -374,16 +371,7 @@ async function startServer() {
 
         if (data.type === "connectTransport") {
           const transport = rooms.get(roomId!)?.peers.get(peerId!)?.transports.get(data.transportId);
-          if (!transport) return;
-          
-          await transport.connect({ dtlsParameters: data.dtlsParameters });
-          
-          if (data.requestId) {
-            const peer = rooms.get(roomId!)?.peers.get(peerId!);
-            if (peer) {
-              safeSend(peer.socket, { type: "transportConnected", requestId: data.requestId });
-            }
-          }
+          if (transport) await transport.connect({ dtlsParameters: data.dtlsParameters });
         }
 
         if (data.type === "producer") {
@@ -406,7 +394,6 @@ async function startServer() {
 
           safeSend(ws, { type: "produced", data: { producerId: producer.id } });
 
-          // Notify ALL other peers about this new producer
           room.peers.forEach((p, id) => {
             if (id === peerId) return;
             safeSend(p.socket, {
@@ -421,42 +408,37 @@ async function startServer() {
           });
         }
 
-      
+        if (data.type === "consumer") {
+          const room = rooms.get(roomId!);
+          const peer = room?.peers.get(peerId!);
+          if (!room || !peer) return;
 
-      /* ---------------- CONSUMER ---------------- */
-      if (data.type === "consumer") {
-        if (!roomId || !peerId) return;
-        const room = rooms.get(roomId);
-        const peer = room?.peers.get(peerId);
-        if (!room || !peer) return;
+          const transport = peer.transports.get(data.transportId);
+          if (!transport) return;
 
-        const transport = peer.transports.get(data.transportId);
-        if (!transport) return;
+          if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) return;
 
-        if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) return;
-
-        const consumer = await transport.consume({
-          producerId: data.producerId,
-          rtpCapabilities: data.rtpCapabilities,
-          paused: true,
-        });
-
-        peer.consumers.set(consumer.id, consumer);
-
-        safeSend(ws, {
-          type: "consumerCreated",
-          data: {
-            id: consumer.id,
+          const consumer = await transport.consume({
             producerId: data.producerId,
-            kind: consumer.kind,
-            rtpParameters: consumer.rtpParameters,
-          },
-        });
-      }
+            rtpCapabilities: data.rtpCapabilities,
+            paused: true,
+          });
+
+          peer.consumers.set(consumer.id, consumer);
+
+          safeSend(ws, {
+            type: "consumerCreated",
+            data: {
+              id: consumer.id,
+              producerId: data.producerId,
+              kind: consumer.kind,
+              rtpParameters: consumer.rtpParameters,
+            },
+          });
+        }
 
         if (data.type === "resumeConsumer") {
-          if (!roomId || !peerId) return;
-          const peer = rooms.get(roomId)?.peers.get(peerId);
+          const peer = rooms.get(roomId!)?.peers.get(peerId!);
           const consumer = peer?.consumers.get(data.consumerId);
           if (consumer) {
             await consumer.resume();
