@@ -60,7 +60,10 @@ export default function MeetingRoom() {
  >(new Map());
  
  const [remoteStreams, setRemoteStreams] =
-    useState<Map<string, MediaStream>>(new Map())
+     useState<Map<string, MediaStream>>(new Map())
+
+  const [remoteParticipants, setRemoteParticipants] =
+     useState<Map<string, { name: string; userId: string }>>(new Map())
 
   const [activeSpeaker, setActiveSpeaker] =
     useState<string | null>(null)
@@ -112,18 +115,20 @@ export default function MeetingRoom() {
   // remote streams (already Map<peerId, stream>)
   remoteStreams.forEach((stream, peerId) => {
     if (peerId === socketIdRef.current) return;
+    const participant = remoteParticipants.get(peerId);
+    const hasVideo = stream.getVideoTracks().length > 0;
     result.push({
       id: peerId,
       stream,
       isLocal: false,
-      userName: `User ${peerId.slice(0, 6)}`, // Fallback for remote users
+      userName: participant?.name || `User ${peerId.slice(0, 6)}`,
       userImage: undefined,
-      isVideoOff: false // We'll need to track remote video state separately
+      isVideoOff: !hasVideo
     });
   });
 
   return result;
-}, [localStream, remoteStreams, cameraOff, session?.user]);
+}, [localStream, remoteStreams, remoteParticipants, cameraOff, session?.user]);
 
 
 
@@ -462,7 +467,9 @@ audioProducerRef.current = audioProducer;
           
             pendingCallbacks.current.set(requestId, () => {
               cb();
-              // After recv transport connected, sync producers
+              // After recv transport connected, process pending producers first
+              processPendingProducers();
+              // Then sync producers
               ws.send(JSON.stringify({
                 type: "syncProducers"
               }));
@@ -508,26 +515,51 @@ audioProducerRef.current = audioProducer;
 
       if (data.type === "producer") {
 
+        console.log("[producer] Received producer message:", data.data);
+
         // ignore self producer by userId
-        if (socketIdRef.current && data.data.peerId === socketIdRef.current) return;
-
-        if (consumedProducersRef.current.has(data.data.producerId)) return;
-
-        consumedProducersRef.current.add(data.data.producerId);
-        
-        const transport = recvTransportRef.current;
-        const device = deviceRef.current;
-
-        if (!transport || !device) {
-          pendingProducers.current.push(data);
+        if (socketIdRef.current && data.data.peerId === socketIdRef.current) {
+          console.log("[producer] Ignoring self producer");
           return;
         }
 
+        if (consumedProducersRef.current.has(data.data.producerId)) {
+          console.log("[producer] Already consumed producer:", data.data.producerId);
+          return;
+        }
+
+        consumedProducersRef.current.add(data.data.producerId);
+        
+        // Set the mapping immediately
         producerPeerMap.current.set(
           data.data.producerId,
           data.data.peerId
         );
 
+        // Track participant info
+        if (data.data.userId) {
+          setRemoteParticipants(prev => {
+            const updated = new Map(prev);
+            if (!updated.has(data.data.peerId)) {
+              updated.set(data.data.peerId, {
+                name: data.data.name || `User ${data.data.peerId.slice(0, 6)}`,
+                userId: data.data.userId
+              });
+            }
+            return updated;
+          });
+        }
+        
+        const transport = recvTransportRef.current;
+        const device = deviceRef.current;
+
+        if (!transport || !device) {
+          console.log("[producer] Transport/device not ready, queuing producer");
+          pendingProducers.current.push(data);
+          return;
+        }
+
+        console.log("[producer] Sending consumer request for producer:", data.data.producerId);
         ws.send(
           JSON.stringify({
             type: "consumer",
@@ -541,18 +573,41 @@ audioProducerRef.current = audioProducer;
 
       if (data.type === "consumerCreated") {
 
+        console.log("[consumerCreated] Received consumer:", data.data);
+
         // skip self stream by checking producer userId against session user id
         const peerId = producerPeerMap.current.get(data.data.producerId);
-        if (socketIdRef.current && peerId === socketIdRef.current) return;
+        console.log("[consumerCreated] Mapped peerId:", peerId, "socketId:", socketIdRef.current);
+        if (socketIdRef.current && peerId === socketIdRef.current) {
+          console.log("[consumerCreated] Skipping self consumer");
+          return;
+        }
 
         const transport = recvTransportRef.current;
-        if (!transport) return;
+        if (!transport) {
+          console.log("[consumerCreated] Transport not ready");
+          return;
+        }
 
         try {
           const consumer = await transport.consume(data.data);
 
+          console.log("[consumerCreated] Consumer created with track:", consumer.track.id, "kind:", consumer.track.kind);
+
           consumer.on("transportclose", () => {
             consumer.close();
+          });
+
+          consumer.on("trackended", () => {
+            console.log("Consumer track ended:", consumer.id);
+            setRemoteStreams(prev => {
+              const updated = new Map(prev);
+              const pId = producerPeerMap.current.get(data.data.producerId);
+              if (pId) {
+                updated.delete(pId);
+              }
+              return updated;
+            });
           });
 
           setRemoteStreams(prev => {
@@ -562,43 +617,40 @@ audioProducerRef.current = audioProducer;
             const peerId = producerPeerMap.current.get(data.data.producerId);
             if (!peerId) return prev;
 
-            let stream = updated.get(peerId);
+            const oldStream = updated.get(peerId);
 
-            if (!stream) {
-              stream = new MediaStream();
-              updated.set(peerId, stream);
-            }
-
-            const alreadyExists = stream.getTracks().some(
-              (t) => t.id === consumer.track.id
-            );
-
-            if (!alreadyExists) {
-              stream.getTracks().forEach((t) => {
-                if (t.kind === consumer.track.kind) {
-                  stream.removeTrack(t);
+            // Create a new MediaStream to trigger React re-render
+            const newStream = new MediaStream();
+            
+            // Add all existing tracks of different kind
+            if (oldStream) {
+              oldStream.getTracks().forEach((t) => {
+                if (t.kind !== consumer.track.kind) {
+                  newStream.addTrack(t);
                 }
               });
-
-              stream.addTrack(consumer.track);
             }
+
+            // Add the new track
+            newStream.addTrack(consumer.track);
+
+            updated.set(peerId, newStream);
+
+            console.log(`Added ${consumer.track.kind} track from peer ${peerId} to stream. Total tracks:`, newStream.getTracks().length);
 
             return updated;
           });
-          if (consumer.track.kind === "audio") {
-            const audio = new Audio();
-            audio.srcObject = new MediaStream([consumer.track]);
-            audio.autoplay = true;
-            audio.muted = false;
-            audio.play().catch(() => {});
-          }
 
-          setActiveSpeaker(prev => prev ?? data.data.producerId);
+          if (consumer.track.kind === "video") {
+            consumer.track.enabled = true;
+          }
 
           ws.send(JSON.stringify({
             type: "resumeConsumer",
             consumerId: consumer.id
           }));
+
+          setActiveSpeaker(prev => prev ?? data.data.producerId);
         } catch (error) {
           console.error("Error consuming stream:", error);
         }

@@ -302,6 +302,7 @@ async function startServer() {
                     kind: producer.kind,
                     peerId: otherId,
                     userId: otherPeer.userId,
+                    name: otherPeer.name,
                   },
                 });
               });
@@ -325,6 +326,7 @@ async function startServer() {
                   peerId: otherId,
                   kind: producer.kind,
                   userId: otherPeer.userId,
+                  name: otherPeer.name,
                 },
               });
             });
@@ -392,10 +394,14 @@ async function startServer() {
             room.audioLevelObserver.addProducer({ producerId: producer.id });
           }
 
+          console.log(`[producer] Created producer ${producer.id} (${producer.kind}) for peer ${peerId}`);
+
           safeSend(ws, { type: "produced", data: { producerId: producer.id } });
 
+          // Broadcast to other peers
           room.peers.forEach((p, id) => {
             if (id === peerId) return;
+            console.log(`[producer] Broadcasting producer ${producer.id} to peer ${id}`);
             safeSend(p.socket, {
               type: "producer",
               data: {
@@ -403,6 +409,7 @@ async function startServer() {
                 peerId: peerId!,
                 kind: producer.kind,
                 userId: peer.userId,
+                name: peer.name,
               },
             });
           });
@@ -416,7 +423,13 @@ async function startServer() {
           const transport = peer.transports.get(data.transportId);
           if (!transport) return;
 
-          if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) return;
+          console.log(`[consumer] Creating consumer for producer ${data.producerId}, peer ${peerId}`);
+
+          if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) {
+            console.log(`[consumer] Cannot consume producer ${data.producerId} - RTP capabilities mismatch`);
+            console.log(`[consumer] Router canConsume returned false`);
+            return;
+          }
 
           const consumer = await transport.consume({
             producerId: data.producerId,
@@ -425,6 +438,8 @@ async function startServer() {
           });
 
           peer.consumers.set(consumer.id, consumer);
+
+          console.log(`[consumer] Created consumer ${consumer.id} for producer ${data.producerId}, kind: ${consumer.kind}`);
 
           safeSend(ws, {
             type: "consumerCreated",

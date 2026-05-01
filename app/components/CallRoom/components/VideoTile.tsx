@@ -23,14 +23,14 @@ export default function VideoTile({
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (ref.current) {
+    if (ref.current && stream) {
         ref.current.srcObject = stream;
 
         ref.current.play().catch(() => {
         console.log("Autoplay blocked");
         });
     }
-    }, [stream]);
+    }, [stream, stream?.getTracks().length]);
 
   return (
     <div className="relative w-full h-full bg-black rounded-xl overflow-hidden">
