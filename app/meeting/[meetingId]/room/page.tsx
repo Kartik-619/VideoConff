@@ -250,6 +250,13 @@ audioProducerRef.current = audioProducer;
     if (!device || !transport) return;
   
     pendingProducers.current.forEach((producerData) => {
+      // Skip if already consumed
+      if (consumedProducersRef.current.has(producerData.data.producerId)) {
+        return;
+      }
+      
+      consumedProducersRef.current.add(producerData.data.producerId);
+      
       producerPeerMap.current.set(
         producerData.data.producerId,
         producerData.data.peerId
@@ -485,35 +492,34 @@ audioProducerRef.current = audioProducer;
         }
       }
 
-      if (data.type === "produced") {
+       if (data.type === "transportConnected") {
 
-        const cb = pendingCallbacks.current.get(data.requestId);
+         const cb = pendingCallbacks.current.get(data.requestId);
       
-        if (cb) {
-          cb({
-            id: data.producerId
-          });
+         if (cb) {
+           cb();
+           pendingCallbacks.current.delete(data.requestId);
+         }
       
-          pendingCallbacks.current.delete(data.requestId);
-        }
-      
-        return;
-      }
+         return;
+       }
 
+       if (data.type === "produced") {
 
-      if (data.type === "transportConnected") {
-
-        const cb = pendingCallbacks.current.get(data.requestId);
+         const cb = pendingCallbacks.current.get(data.requestId);
       
-        if (cb) {
-          cb();
-          pendingCallbacks.current.delete(data.requestId);
-        }
+         if (cb) {
+           cb({
+             id: data.producerId
+           });
       
-        return;
-      }
+           pendingCallbacks.current.delete(data.requestId);
+         }
+      
+         return;
+       }
 
-      if (data.type === "producer") {
+       if (data.type === "producer") {
 
         console.log("[producer] Received producer message:", data.data);
 

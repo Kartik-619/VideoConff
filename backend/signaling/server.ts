@@ -200,6 +200,28 @@ app.post("/startMeeting", async (req, res) => {
     });
   }
   await broadcastLobby(roomId);
+
+  // Re-broadcast all existing producers so clients can set up consumers in meeting room
+  if (room) {
+    room.peers.forEach((peer: Peer, peerId: string) => {
+      room.peers.forEach((otherPeer: Peer, otherId: string) => {
+        if (otherId === peerId) return;
+        otherPeer.producers.forEach((producer: any) => {
+          safeSend(peer.socket, {
+            type: "producer",
+            data: {
+              producerId: producer.id,
+              kind: producer.kind,
+              peerId: otherId,
+              userId: otherPeer.userId,
+              name: otherPeer.name,
+            },
+          });
+        });
+      });
+    });
+  }
+
   res.json({ ok: true });
 });
 
@@ -283,7 +305,7 @@ async function startServer() {
             // Cancel any pending deletion — room is active again
             cancelDeletionTimer(roomId!);
 
-            safeSend(ws, { type: "joined", peerId });
+            safeSend(ws, { type: "joined", peerId, hostId: room.peers.get(Array.from(room.peers.keys())[0])?.userId || null });
             await broadcastLobby(roomId!);
 
             safeSend(ws, {
@@ -291,7 +313,7 @@ async function startServer() {
               data: room.router.rtpCapabilities,
             });
 
-            // Send existing producers to new peer
+            // Send existing producers to new peer (client consumes when recv transport ready)
             room.peers.forEach((otherPeer, otherId) => {
               if (otherId === peerId) return;
               otherPeer.producers.forEach((producer: any) => {
@@ -373,7 +395,10 @@ async function startServer() {
 
         if (data.type === "connectTransport") {
           const transport = rooms.get(roomId!)?.peers.get(peerId!)?.transports.get(data.transportId);
-          if (transport) await transport.connect({ dtlsParameters: data.dtlsParameters });
+          if (transport) {
+            await transport.connect({ dtlsParameters: data.dtlsParameters });
+            safeSend(ws, { type: "transportConnected", requestId: data.requestId });
+          }
         }
 
         if (data.type === "producer") {
@@ -396,7 +421,7 @@ async function startServer() {
 
           console.log(`[producer] Created producer ${producer.id} (${producer.kind}) for peer ${peerId}`);
 
-          safeSend(ws, { type: "produced", data: { producerId: producer.id } });
+          safeSend(ws, { type: "produced", data: { producerId: producer.id }, requestId: data.requestId });
 
           // Broadcast to other peers
           room.peers.forEach((p, id) => {
@@ -434,7 +459,7 @@ async function startServer() {
           const consumer = await transport.consume({
             producerId: data.producerId,
             rtpCapabilities: data.rtpCapabilities,
-            paused: true,
+            paused: false,
           });
 
           peer.consumers.set(consumer.id, consumer);
