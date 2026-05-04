@@ -1,6 +1,6 @@
 import * as mediasoup from "mediasoup";
 import type { RtpCodecCapability } from "mediasoup/types";
-import { createWorker } from "./worker";
+import { getSharedWorker } from "./webrtc";
 
 const mediaCodecs: RtpCodecCapability[] = [
   {
@@ -29,9 +29,9 @@ const mediaCodecs: RtpCodecCapability[] = [
   }
 ];
 
-// creating rooms
+// creating rooms - uses shared worker from webrtc.ts
 export const createRouter = async () => {
-  const worker = await createWorker();
+  const worker = getSharedWorker();
 
   const router = await worker.createRouter({
     mediaCodecs

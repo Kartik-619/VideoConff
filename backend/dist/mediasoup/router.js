@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createRouter = void 0;
-const worker_1 = require("./worker");
+const webrtc_1 = require("./webrtc");
 const mediaCodecs = [
     {
         kind: "audio",
@@ -28,9 +28,9 @@ const mediaCodecs = [
         }
     }
 ];
-// creating rooms
+// creating rooms - uses shared worker from webrtc.ts
 const createRouter = async () => {
-    const worker = await (0, worker_1.createWorker)();
+    const worker = (0, webrtc_1.getSharedWorker)();
     const router = await worker.createRouter({
         mediaCodecs
     });

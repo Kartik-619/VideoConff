@@ -173,11 +173,33 @@ app.post("/startMeeting", async (req, res) => {
         });
     }
     await broadcastLobby(roomId);
+    // Re-broadcast all existing producers so clients can set up consumers in meeting room
+    if (room) {
+        room.peers.forEach((peer, peerId) => {
+            room.peers.forEach((otherPeer, otherId) => {
+                if (otherId === peerId)
+                    return;
+                otherPeer.producers.forEach((producer) => {
+                    safeSend(peer.socket, {
+                        type: "producer",
+                        data: {
+                            producerId: producer.id,
+                            kind: producer.kind,
+                            peerId: otherId,
+                            userId: otherPeer.userId,
+                            name: otherPeer.name,
+                        },
+                    });
+                });
+            });
+        });
+    }
     res.json({ ok: true });
 });
 /* ---------------- SERVER ---------------- */
 async function startServer() {
-    const webRtcServer = await (0, webrtc_1.createWebRTCServer)();
+    // Initialize mediasoup (shared worker + WebRTC server)
+    const { webRtcServer } = await (0, webrtc_1.initializeMediasoup)();
     const PORT = process.env.PORT || 8080;
     const server = app.listen(PORT, () => console.log(`WS Server running on ${PORT}`));
     const wss = new ws_1.WebSocketServer({ server });
@@ -242,13 +264,13 @@ async function startServer() {
                         await redis_1.redis.sadd(`meeting:${roomId}:participants`, userId);
                         // Cancel any pending deletion — room is active again
                         cancelDeletionTimer(roomId);
-                        safeSend(ws, { type: "joined", peerId });
+                        safeSend(ws, { type: "joined", peerId, hostId: room.peers.get(Array.from(room.peers.keys())[0])?.userId || null });
                         await broadcastLobby(roomId);
                         safeSend(ws, {
                             type: "rtpCapabilities",
                             data: room.router.rtpCapabilities,
                         });
-                        // Send existing producers to new peer
+                        // Send existing producers to new peer (client consumes when recv transport ready)
                         room.peers.forEach((otherPeer, otherId) => {
                             if (otherId === peerId)
                                 return;
@@ -260,6 +282,7 @@ async function startServer() {
                                         kind: producer.kind,
                                         peerId: otherId,
                                         userId: otherPeer.userId,
+                                        name: otherPeer.name,
                                     },
                                 });
                             });
@@ -284,6 +307,7 @@ async function startServer() {
                                     peerId: otherId,
                                     kind: producer.kind,
                                     userId: otherPeer.userId,
+                                    name: otherPeer.name,
                                 },
                             });
                         });
@@ -326,14 +350,9 @@ async function startServer() {
                 }
                 if (data.type === "connectTransport") {
                     const transport = rooms.get(roomId)?.peers.get(peerId)?.transports.get(data.transportId);
-                    if (!transport)
-                        return;
-                    await transport.connect({ dtlsParameters: data.dtlsParameters });
-                    if (data.requestId) {
-                        const peer = rooms.get(roomId)?.peers.get(peerId);
-                        if (peer) {
-                            safeSend(peer.socket, { type: "transportConnected", requestId: data.requestId });
-                        }
+                    if (transport) {
+                        await transport.connect({ dtlsParameters: data.dtlsParameters });
+                        safeSend(ws, { type: "transportConnected", requestId: data.requestId });
                     }
                 }
                 if (data.type === "producer") {
@@ -352,10 +371,13 @@ async function startServer() {
                     if (producer.kind === "audio") {
                         room.audioLevelObserver.addProducer({ producerId: producer.id });
                     }
-                    safeSend(ws, { type: "produced", data: { producerId: producer.id } });
+                    console.log(`[producer] Created producer ${producer.id} (${producer.kind}) for peer ${peerId}`);
+                    safeSend(ws, { type: "produced", data: { producerId: producer.id }, requestId: data.requestId });
+                    // Broadcast to other peers
                     room.peers.forEach((p, id) => {
                         if (id === peerId)
                             return;
+                        console.log(`[producer] Broadcasting producer ${producer.id} to peer ${id}`);
                         safeSend(p.socket, {
                             type: "producer",
                             data: {
@@ -363,14 +385,12 @@ async function startServer() {
                                 peerId: peerId,
                                 kind: producer.kind,
                                 userId: peer.userId,
+                                name: peer.name,
                             },
                         });
                     });
                 }
-                /* ---------------- CONSUMER ---------------- */
                 if (data.type === "consumer") {
-                    if (!roomId || !peerId)
-                        return;
                     const room = rooms.get(roomId);
                     const peer = room?.peers.get(peerId);
                     if (!room || !peer)
@@ -378,18 +398,23 @@ async function startServer() {
                     const transport = peer.transports.get(data.transportId);
                     if (!transport)
                         return;
-                    if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities }))
+                    console.log(`[consumer] Creating consumer for producer ${data.producerId}, peer ${peerId}`);
+                    if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) {
+                        console.log(`[consumer] Cannot consume producer ${data.producerId} - RTP capabilities mismatch`);
+                        console.log(`[consumer] Router canConsume returned false`);
                         return;
+                    }
                     const consumer = await transport.consume({
                         producerId: data.producerId,
                         rtpCapabilities: data.rtpCapabilities,
-                        paused: true,
+                        paused: false,
                     });
                     peer.consumers.set(consumer.id, consumer);
+                    console.log(`[consumer] Created consumer ${consumer.id} for producer ${data.producerId}, kind: ${consumer.kind}`);
                     safeSend(ws, {
                         type: "consumerCreated",
                         data: {
-                            id: consumer.id,
+                            serverConsumerId: consumer.id,
                             producerId: data.producerId,
                             kind: consumer.kind,
                             rtpParameters: consumer.rtpParameters,
@@ -397,8 +422,6 @@ async function startServer() {
                     });
                 }
                 if (data.type === "resumeConsumer") {
-                    if (!roomId || !peerId)
-                        return;
                     const peer = rooms.get(roomId)?.peers.get(peerId);
                     const consumer = peer?.consumers.get(data.consumerId);
                     if (consumer) {

@@ -15,7 +15,7 @@ import cors from "cors";
 
 import { createRouter } from "../mediasoup/router";
 import { createTransport } from "../mediasoup/transport";
-import { createWebRTCServer } from "../mediasoup/webrtc";
+import { initializeMediasoup, getSharedWebRtcServer } from "../mediasoup/webrtc";
 
 import { prisma } from "../lib/prisma";
 import { redis } from "../lib/redis";
@@ -228,7 +228,8 @@ app.post("/startMeeting", async (req, res) => {
 /* ---------------- SERVER ---------------- */
 
 async function startServer() {
-  const webRtcServer = await createWebRTCServer();
+  // Initialize mediasoup (shared worker + WebRTC server)
+  const { webRtcServer } = await initializeMediasoup();
   const PORT = process.env.PORT || 8080;
   const server = app.listen(PORT, () => console.log(`WS Server running on ${PORT}`));
 
@@ -469,7 +470,7 @@ async function startServer() {
           safeSend(ws, {
             type: "consumerCreated",
             data: {
-              id: consumer.id,
+              serverConsumerId: consumer.id,
               producerId: data.producerId,
               kind: consumer.kind,
               rtpParameters: consumer.rtpParameters,

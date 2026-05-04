@@ -577,90 +577,101 @@ audioProducerRef.current = audioProducer;
       }
 
 
-      if (data.type === "consumerCreated") {
+        if (data.type === "consumerCreated") {
+          console.log("[consumerCreated] Received consumer:", data.data);
 
-        console.log("[consumerCreated] Received consumer:", data.data);
-
-        // skip self stream by checking producer userId against session user id
-        const peerId = producerPeerMap.current.get(data.data.producerId);
-        console.log("[consumerCreated] Mapped peerId:", peerId, "socketId:", socketIdRef.current);
-        if (socketIdRef.current && peerId === socketIdRef.current) {
-          console.log("[consumerCreated] Skipping self consumer");
-          return;
-        }
-
-        const transport = recvTransportRef.current;
-        if (!transport) {
-          console.log("[consumerCreated] Transport not ready");
-          return;
-        }
-
-        try {
-          const consumer = await transport.consume(data.data);
-
-          console.log("[consumerCreated] Consumer created with track:", consumer.track.id, "kind:", consumer.track.kind);
-
-          consumer.on("transportclose", () => {
-            consumer.close();
-          });
-
-          consumer.on("trackended", () => {
-            console.log("Consumer track ended:", consumer.id);
-            setRemoteStreams(prev => {
-              const updated = new Map(prev);
-              const pId = producerPeerMap.current.get(data.data.producerId);
-              if (pId) {
-                updated.delete(pId);
-              }
-              return updated;
-            });
-          });
-
-          setRemoteStreams(prev => {
-
-            const updated = new Map(prev);
-
-            const peerId = producerPeerMap.current.get(data.data.producerId);
-            if (!peerId) return prev;
-
-            const oldStream = updated.get(peerId);
-
-            // Create a new MediaStream to trigger React re-render
-            const newStream = new MediaStream();
-            
-            // Add all existing tracks of different kind
-            if (oldStream) {
-              oldStream.getTracks().forEach((t) => {
-                if (t.kind !== consumer.track.kind) {
-                  newStream.addTrack(t);
-                }
-              });
-            }
-
-            // Add the new track
-            newStream.addTrack(consumer.track);
-
-            updated.set(peerId, newStream);
-
-            console.log(`Added ${consumer.track.kind} track from peer ${peerId} to stream. Total tracks:`, newStream.getTracks().length);
-
-            return updated;
-          });
-
-          if (consumer.track.kind === "video") {
-            consumer.track.enabled = true;
+          // skip self stream by checking producer userId against session user id
+          const peerId = producerPeerMap.current.get(data.data.producerId);
+          console.log("[consumerCreated] Mapped peerId:", peerId, "socketId:", socketIdRef.current);
+          if (socketIdRef.current && peerId === socketIdRef.current) {
+            console.log("[consumerCreated] Skipping self consumer");
+            return;
           }
 
-          ws.send(JSON.stringify({
-            type: "resumeConsumer",
-            consumerId: consumer.id
-          }));
+          const transport = recvTransportRef.current;
+          const device = deviceRef.current;
+          if (!transport || !device) {
+            console.log("[consumerCreated] Transport or device not ready");
+            return;
+          }
 
-          setActiveSpeaker(prev => prev ?? data.data.producerId);
-        } catch (error) {
-          console.error("Error consuming stream:", error);
+          try {
+            // Properly call mediasoup-client consume with correct parameters
+            // Client-side consume needs id, kind, rtpParameters from server
+            const consumer = await transport.consume({
+              id: data.data.serverConsumerId,
+              producerId: data.data.producerId,
+              kind: data.data.kind,
+              rtpParameters: data.data.rtpParameters,
+            });
+
+            console.log("[consumerCreated] Consumer created with track:", consumer.track?.id, "kind:", consumer.track?.kind);
+
+            consumer.on("transportclose", () => {
+              consumer.close();
+            });
+
+            consumer.on("trackended", () => {
+              console.log("Consumer track ended:", consumer.id);
+              setRemoteStreams(prev => {
+                const updated = new Map(prev);
+                const pId = producerPeerMap.current.get(data.data.producerId);
+                if (pId) {
+                  updated.delete(pId);
+                }
+                return updated;
+              });
+            });
+
+            // Resume the client-side consumer (mediasoup-client creates consumers paused)
+            await consumer.resume();
+            console.log("[consumerCreated] Client-side consumer resumed:", consumer.id);
+
+            setRemoteStreams(prev => {
+              const updated = new Map(prev);
+
+              const peerId = producerPeerMap.current.get(data.data.producerId);
+              if (!peerId) return prev;
+
+              const oldStream = updated.get(peerId);
+
+              // Create a new MediaStream to trigger React re-render
+              const newStream = new MediaStream();
+              
+              // Add all existing tracks of different kind
+              if (oldStream) {
+                oldStream.getTracks().forEach((t:any) => {
+                  if (t.kind !== consumer.track.kind) {
+                    newStream.addTrack(t);
+                  }
+                });
+              }
+
+              // Add the new track
+              newStream.addTrack(consumer.track);
+
+              updated.set(peerId, newStream);
+
+              console.log(`Added ${consumer.track.kind} track from peer ${peerId} to stream. Total tracks:`, newStream.getTracks().length);
+
+              return updated;
+            });
+
+            if (consumer.track?.kind === "video") {
+              consumer.track.enabled = true;
+            }
+
+            // Resume the server-side consumer
+            ws.send(JSON.stringify({
+              type: "resumeConsumer",
+              consumerId: data.data.serverConsumerId
+            }));
+
+            setActiveSpeaker(prev => prev ?? data.data.producerId);
+          } catch (error) {
+            console.error("Error consuming stream:", error);
+          }
         }
-      }
     }
 
     ws.onclose = () => {
