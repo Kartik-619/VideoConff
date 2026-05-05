@@ -1,326 +1,277 @@
 'use client'
 
-import * as mediasoupClient from "mediasoup-client"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import toast from "react-hot-toast";
+import toast from "react-hot-toast"
 import { useSession } from "next-auth/react"
-import { types as mediasoupTypes } from "mediasoup-client";
-import { LayoutCall } from "../../../components/CallRoom/components/callLayout";
-import VideoTile from '../../../components/CallRoom/components/VideoTile';
+import { LayoutCall } from "../../../components/CallRoom/components/callLayout"
+import VideoTile from '../../../components/CallRoom/components/VideoTile'
 import {
   FaMicrophone,
   FaMicrophoneSlash,
   FaVideo,
   FaVideoSlash,
   FaDesktop,
-  FaUserFriends,
   FaPhoneSlash
-} from "react-icons/fa";
-
-import { MessageSquare } from "lucide-react";
+} from "react-icons/fa"
+import { MessageSquare } from "lucide-react"
 
 export default function MeetingRoom() {
-
   const params = useParams()
   const meetingId = params.meetingId as string
-  const producerPeerMap = useRef<Map<string, string>>(new Map());
-  const pendingProducers = useRef<any[]>([]);
-
   const router = useRouter()
   const { data: session } = useSession()
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
-
-
-  const consumedProducersRef = useRef<Set<string>>(new Set());
-
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const deviceRef = useRef<mediasoupClient.Device | null>(null)
-
-  const sendTransportRef = useRef<mediasoupTypes.Transport | null>(null)
-  const recvTransportRef = useRef<mediasoupTypes.Transport | null>(null)
-
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localThumbRef = useRef<HTMLVideoElement>(null)
-  const socketIdRef = useRef<string | null>(null);
-
-  const videoProducerRef = useRef<mediasoupTypes.Producer | null>(null);
-  const audioProducerRef = useRef<mediasoupTypes.Producer | null>(null);
-
-  const producedRef = useRef(false)
-  const startedRef = useRef(false)
-  const chatInputRef = useRef<HTMLInputElement | null>(null);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-
+  const socketIdRef = useRef<string | null>(null)
   const screenTrackRef = useRef<MediaStreamTrack | null>(null)
-  const pendingCallbacks = useRef<
-  Map<string,(arg?: any)=>void>
- >(new Map());
- 
- const [remoteStreams, setRemoteStreams] =
-     useState<Map<string, MediaStream>>(new Map())
-
-  const [remoteParticipants, setRemoteParticipants] =
-     useState<Map<string, { name: string; userId: string }>>(new Map())
-
-  const [activeSpeaker, setActiveSpeaker] =
-    useState<string | null>(null)
-
-  const [viewMode, setViewMode] =
-    useState<'speaker'>('speaker')
-
+  const chatInputRef = useRef<HTMLInputElement | null>(null)
+  const chatEndRef = useRef<HTMLDivElement | null>(null)
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map())
+  const [remoteParticipants, setRemoteParticipants] = useState<Map<string, { name: string; userId: string }>>(new Map())
   const [isMuted, setIsMuted] = useState(false)
   const [cameraOff, setCameraOff] = useState(false)
-  const meetingEndedRef = useRef(false);
-
-  const [hostId,setHostId] = useState<string | null>(null);
-
-  const [chatOpen, setChatOpen] = useState(false);
-
+  const meetingEndedRef = useRef(false)
+  const [hostId, setHostId] = useState<string | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
-
-  const [connectionStatus, setConnectionStatus] =
-    useState("Connecting...");
-  const [participants, setParticipants] = useState(0);
-
-  const [messages, setMessages] = useState<any[]>([]);
-  const joinSentRef = useRef(false);
+  const [connectionStatus, setConnectionStatus] = useState("Connecting...")
+  const [participants, setParticipants] = useState(0)
+  const [messages, setMessages] = useState<any[]>([])
+  const joinSentRef = useRef(false)
+  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
+  const pendingOffersRef = useRef<any[]>([])
+  const pendingPeersRef = useRef<Array<{peerId: string; name: string; userId: string}>>([])
 
   const allStreams = useMemo(() => {
-  const result: { 
-    id: string; 
-    stream: MediaStream; 
-    isLocal: boolean;
-    userName?: string;
-    userImage?: string;
-    isVideoOff?: boolean;
-  }[] = [];
+    const result: { 
+      id: string; 
+      stream: MediaStream; 
+      isLocal: boolean;
+      userName?: string;
+      userImage?: string;
+      isVideoOff?: boolean;
+    }[] = []
 
- 
+    if (localStream) {
+      result.push({
+        id: "local",
+        stream: localStream,
+        isLocal: true,
+        userName: session?.user?.name || undefined,
+        userImage: session?.user?.image || undefined,
+        isVideoOff: cameraOff
+      })
+    }
 
-  // local stream
-  if (localStream) {
-    result.push({
-      id: "local",
-      stream: localStream,
-      isLocal: true,
-      userName: session?.user?.name || undefined,
-      userImage: session?.user?.image || undefined,
-      isVideoOff: cameraOff
-    });
-  }
+    remoteStreams.forEach((stream, peerId) => {
+      if (peerId === socketIdRef.current) return
+      const participant = remoteParticipants.get(peerId)
+      const hasVideo = stream.getVideoTracks().length > 0
+      result.push({
+        id: peerId,
+        stream,
+        isLocal: false,
+        userName: participant?.name || `User ${peerId.slice(0, 6)}`,
+        userImage: undefined,
+        isVideoOff: !hasVideo
+      })
+    })
 
-  // remote streams (already Map<peerId, stream>)
-  remoteStreams.forEach((stream, peerId) => {
-    if (peerId === socketIdRef.current) return;
-    const participant = remoteParticipants.get(peerId);
-    const hasVideo = stream.getVideoTracks().length > 0;
-    result.push({
-      id: peerId,
-      stream,
-      isLocal: false,
-      userName: participant?.name || `User ${peerId.slice(0, 6)}`,
-      userImage: undefined,
-      isVideoOff: !hasVideo
-    });
-  });
+    return result
+  }, [localStream, remoteStreams, remoteParticipants, cameraOff, session?.user])
 
-  return result;
-}, [localStream, remoteStreams, remoteParticipants, cameraOff, session?.user]);
-
-
-
-useEffect(() => {
-  if (chatOpen) {
-    setTimeout(() => {
-      chatInputRef.current?.focus();
-    }, 100);
-  }
-}, [chatOpen]);
+  useEffect(() => {
+    if (chatOpen) {
+      setTimeout(() => {
+        chatInputRef.current?.focus()
+      }, 100)
+    }
+  }, [chatOpen])
 
   useEffect(() => {
     return () => {
-      wsRef.current?.close(); // 🔥 important cleanup
-      producerPeerMap.current.clear(); // Clean up producerPeerMap
-    };
-  }, []);
+      wsRef.current?.close()
+    }
+  }, [])
 
   useEffect(() => {
-  if (chatOpen) {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatOpen) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [messages, chatOpen])
+
+  function sendMessage(msg: string) {
+    if (!wsRef.current) return
+    wsRef.current.send(JSON.stringify({
+      type: "chatMessage",
+      message: msg,
+    }))
   }
-}, [messages, chatOpen]);
 
-  async function startProducing(
-    transport: mediasoupTypes.Transport
-  ) {
+  async function createPeerConnection(peerId: string, isInitiator: boolean) {
+    if (peerConnectionsRef.current.has(peerId)) {
+      closePeerConnection(peerId)
+    }
 
-    if (producedRef.current) return
-    producedRef.current = true
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    })
 
-    const stream =
-      await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      })
+    peerConnectionsRef.current.set(peerId, pc)
 
-    setLocalStream(stream)
-
-    if (localVideoRef.current) localVideoRef.current.srcObject = stream
-    if (localThumbRef.current) localThumbRef.current.srcObject = stream
-
-    const videoProducer = await transport.produce({
-      track: stream.getVideoTracks()[0],
-      encodings: [
-        { maxBitrate: 100000, scaleResolutionDownBy: 4 },
-        { maxBitrate: 300000, scaleResolutionDownBy: 2 },
-        { maxBitrate: 900000, scaleResolutionDownBy: 1 }
-      ],
-      codecOptions: {
-        videoGoogleStartBitrate: 1000
+    pc.ontrack = (event) => {
+      console.log(`[WebRTC] Received track from ${peerId}:`, event.track.kind)
+      const [remoteStream] = event.streams
+      if (remoteStream) {
+        setRemoteStreams(prev => {
+          const updated = new Map(prev)
+          updated.set(peerId, remoteStream)
+          return updated
+        })
       }
-    });
+    }
 
-    videoProducerRef.current = videoProducer;
+    pc.onicecandidate = (event) => {
+      if (event.candidate && wsRef.current) {
+        wsRef.current.send(JSON.stringify({
+          type: "ice-candidate",
+          candidate: event.candidate,
+          targetPeerId: peerId,
+        }))
+      }
+    }
 
-    const audioProducer = await transport.produce({
-  track: stream.getAudioTracks()[0]
-});
+    pc.onconnectionstatechange = () => {
+      console.log(`[WebRTC] Connection state for ${peerId}:`, pc.connectionState)
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        console.log(`[WebRTC] Connection lost with ${peerId}`)
+        closePeerConnection(peerId)
+      }
+    }
 
-audioProducerRef.current = audioProducer;
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream)
+      })
+    }
+
+    if (isInitiator) {
+      try {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        if (wsRef.current) {
+          wsRef.current.send(JSON.stringify({
+            type: "offer",
+            sdp: pc.localDescription,
+            targetPeerId: peerId,
+          }))
+          console.log(`[WebRTC] Sent offer to ${peerId}`)
+        }
+      } catch (err) {
+        console.error("Error creating offer:", err)
+      }
+    }
+
+    return pc
+  }
+
+  function closePeerConnection(peerId: string) {
+    const pc = peerConnectionsRef.current.get(peerId)
+    if (pc) {
+      pc.close()
+      peerConnectionsRef.current.delete(peerId)
+    }
+    setRemoteStreams(prev => {
+      const updated = new Map(prev)
+      updated.delete(peerId)
+      return updated
+    })
   }
 
   async function startScreenShare() {
-
     try {
-
       if (screenSharing) {
         screenTrackRef.current?.stop()
         setScreenSharing(false)
         return
       }
 
-      const stream =
-        await navigator.mediaDevices.getDisplayMedia({
-          video: true
-        })
-
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
       const track = stream.getVideoTracks()[0]
+      screenTrackRef.current = track
+      setScreenSharing(true)
 
-      const transport = sendTransportRef.current
-      if (!transport) return
+      peerConnectionsRef.current.forEach((pc) => {
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+        if (sender) {
+          sender.replaceTrack(track)
+        }
+      })
 
-      const screenProducer = await transport.produce({
-        track
-      });
-      
-      screenTrackRef.current = track;
-      setScreenSharing(true);
-      
       track.onended = () => {
-        screenProducer.close();
-        track.stop();
-        screenTrackRef.current = null;
-        setScreenSharing(false);
-      };
-
+        screenTrackRef.current = null
+        setScreenSharing(false)
+        const cameraTrack = localStream?.getVideoTracks()[0]
+        if (cameraTrack) {
+          peerConnectionsRef.current.forEach((pc) => {
+            const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+            if (sender) {
+              sender.replaceTrack(cameraTrack)
+            }
+          })
+        }
+      }
     } catch (err) {
       console.error(err)
     }
-
   }
 
-  function sendMessage(msg: string) {
-    if (!wsRef.current) return;
-
-    wsRef.current.send(
-      JSON.stringify({
-        type: "chatMessage",
-        message: msg,
-      })
-    );
-  }
-
-  function processPendingProducers() {
-    const device = deviceRef.current;
-    const transport = recvTransportRef.current;
-  
-    if (!device || !transport) return;
-  
-    pendingProducers.current.forEach((producerData) => {
-      // Skip if already consumed
-      if (consumedProducersRef.current.has(producerData.data.producerId)) {
-        return;
-      }
-      
-      consumedProducersRef.current.add(producerData.data.producerId);
-      
-      producerPeerMap.current.set(
-        producerData.data.producerId,
-        producerData.data.peerId
-      );
-  
-      wsRef.current?.send(
-        JSON.stringify({
-          type: "consumer",
-          producerId: producerData.data.producerId,
-          transportId: transport.id,
-          rtpCapabilities: device.rtpCapabilities,
-        })
-      );
-    });
-  
-    pendingProducers.current = [];
-  }
-
-  const connectingRef=useRef(false);
+  const connectingRef = useRef(false)
 
   async function connectWebSocket() {
     if (
       connectingRef.current ||
       wsRef.current?.readyState === WebSocket.OPEN ||
       wsRef.current?.readyState === WebSocket.CONNECTING
-     ){
-      return;
-     }
-    connectingRef.current=true;
+    ) {
+      return
+    }
+    connectingRef.current = true
 
-    const res = await fetch("/api/ws-token");
+    const res = await fetch("/api/ws-token")
     if (!res.ok) {
-      console.error("Failed to get WS token");
-      connectingRef.current = false;
-      return;
+      console.error("Failed to get WS token")
+      connectingRef.current = false
+      return
     }
 
-    const { token } = await res.json();
-    
-    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https', 'wss').replace('http', 'ws') || 'ws://localhost:8080'}?token=${token}`);
-    wsRef.current = ws;
-    joinSentRef.current = false;
+    const { token } = await res.json()
+    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https', 'wss').replace('http', 'ws') || 'ws://localhost:8080'}?token=${token}`)
+    wsRef.current = ws
+    joinSentRef.current = false
 
     ws.onopen = () => {
-
-      if (joinSentRef.current) return;
-      joinSentRef.current = true;
-
+      if (joinSentRef.current) return
+      joinSentRef.current = true
       ws.send(JSON.stringify({
-        type:"join",
+        type: "join",
         roomId: meetingId
-      }));
-      };
+      }))
+    }
 
     ws.onmessage = async (e) => {
-
       const data = JSON.parse(e.data)
 
       if (data.type === "lobbyUpdate") {
-        setParticipants(data.participants.length);
-      }
-
-      if (data.type === "activeSpeaker") {
-        setActiveSpeaker(data.producerId)
+        setParticipants(data.participants.length)
       }
 
       if (data.type === "chatMessage") {
@@ -331,471 +282,218 @@ audioProducerRef.current = audioProducer;
             name: data.data.name,
             userId: data.data.userId,
             timestamp: data.data.timestamp,
-          },
-        ]);
+          }
+        ])
       }
 
       if (data.type === "meetingEnded") {
-
-        if (meetingEndedRef.current) return; 
-
-        toast.error("Meeting ended by host"); // ✅ better UX
-
-        cleanupAndExit(); // 🔥 FIRST
-
-        wsRef.current?.close(); // 🔥 AFTER
-      }
-
-      if (data.type === "producerClosed") {
-        const producerId = data.producerId;
-      
-        // remove producer from dedupe set
-        consumedProducersRef.current.delete(producerId);
-      
-        setRemoteStreams((prev) => {
-          const updated = new Map(prev);
-      
-          const peerId = producerPeerMap.current.get(producerId);
-      
-          // remove producer -> peer mapping
-          producerPeerMap.current.delete(producerId);
-      
-          if (!peerId) return prev;
-      
-          const stream = updated.get(peerId);
-      
-          if (stream) {
-            stream.getTracks().forEach(track => track.stop());
-            updated.delete(peerId);
-          }
-      
-          return updated;
-        });
+        if (meetingEndedRef.current) return
+        toast.error("Meeting ended by host")
+        cleanupAndExit()
+        wsRef.current?.close()
       }
 
       if (data.type === "joined") {
-        socketIdRef.current = data.peerId;
-        setHostId(data.hostId);
-      deviceRef.current=null;
-        setRemoteStreams(new Map());
-        producerPeerMap.current.clear();
-        consumedProducersRef.current.clear(); // add
-        pendingProducers.current = [];        // add
-        pendingCallbacks.current.clear();     // add
-        producedRef.current = false;
-        reconnectAttempts.current = 0;
-      
-        ws.send(JSON.stringify({
-          type: "getParticipants"
-        }));
-      }
+        socketIdRef.current = data.peerId
+        setHostId(data.hostId)
+        setRemoteStreams(new Map())
+        setRemoteParticipants(new Map())
+        peerConnectionsRef.current.clear()
+        pendingOffersRef.current = []
+        pendingPeersRef.current = []
+        reconnectAttempts.current = 0
 
-      if (data.type === "rtpCapabilities") {
-
-        if (deviceRef.current) return; // add
-      
-        const device = new mediasoupClient.Device();
-      
-        await device.load({
-          routerRtpCapabilities: data.data
-        });
-      
-        deviceRef.current = device;
-      
-        ws.send(JSON.stringify({
-          type:"createTransport",
-          direction:"send"
-        }));
-      
-        ws.send(JSON.stringify({
-          type:"createTransport",
-          direction:"recv"
-        }));
-      }
-
-      if (data.type === "transportCreated") {
-
-        const device = deviceRef.current;
-        if (!device) return;
-      
-        let transport: mediasoupTypes.Transport;
-      
-        if (data.data.direction === "send") {
-      
-          // prevent duplicate send transport
-          if (sendTransportRef.current) return;
-      
-          transport = device.createSendTransport(data.data);
-          sendTransportRef.current = transport;
-
-          transport.on("connect", ({ dtlsParameters }, cb, errback) => {
-            try{
-              const requestId = crypto.randomUUID();
-          
-              pendingCallbacks.current.set(requestId, cb);
-          
-              ws.send(JSON.stringify({
-                type:"connectTransport",
-                requestId,
-                transportId: transport.id,
-                dtlsParameters
-              }));
-            } catch(e){
-              errback(e as Error);
-            }
-          });
-
-          transport.on("produce", (p, cb) => {
-
-            const requestId = crypto.randomUUID();
-          
-            pendingCallbacks.current.set(requestId, cb);
-          
-            ws.send(JSON.stringify({
-              type:"producer",
-              requestId,
-              transportId: transport.id,
-              kind: p.kind,
-              rtpParameters: p.rtpParameters
-            }));
-          });
-          startProducing(transport)
-
-        } else {
- 
-          // prevent duplicate recv transport
-          if (recvTransportRef.current) return;
-       
-          transport = device.createRecvTransport(data.data);
-          recvTransportRef.current = transport;
-          
-          transport.on("connect", ({ dtlsParameters }, cb, errback) => {
-            const requestId = crypto.randomUUID();
-          
-            pendingCallbacks.current.set(requestId, () => {
-              cb();
-              // After recv transport connected, process pending producers first
-              processPendingProducers();
-              // Then sync producers
-              ws.send(JSON.stringify({
-                type: "syncProducers"
-              }));
-            });
-          
-            ws.send(JSON.stringify({
-              type: "connectTransport",
-              requestId,
-              transportId: transport.id,
-              dtlsParameters
-            }));
-          });
-        }
-      }
-
-       if (data.type === "transportConnected") {
-
-         const cb = pendingCallbacks.current.get(data.requestId);
-      
-         if (cb) {
-           cb();
-           pendingCallbacks.current.delete(data.requestId);
-         }
-      
-         return;
-       }
-
-       if (data.type === "produced") {
-
-         const cb = pendingCallbacks.current.get(data.requestId);
-      
-         if (cb) {
-           cb({
-             id: data.producerId
-           });
-      
-           pendingCallbacks.current.delete(data.requestId);
-         }
-      
-         return;
-       }
-
-       if (data.type === "producer") {
-
-        console.log("[producer] Received producer message:", data.data);
-
-        // ignore self producer by userId
-        if (socketIdRef.current && data.data.peerId === socketIdRef.current) {
-          console.log("[producer] Ignoring self producer");
-          return;
-        }
-
-        if (consumedProducersRef.current.has(data.data.producerId)) {
-          console.log("[producer] Already consumed producer:", data.data.producerId);
-          return;
-        }
-
-        consumedProducersRef.current.add(data.data.producerId);
-        
-        // Set the mapping immediately
-        producerPeerMap.current.set(
-          data.data.producerId,
-          data.data.peerId
-        );
-
-        // Track participant info
-        if (data.data.userId) {
-          setRemoteParticipants(prev => {
-            const updated = new Map(prev);
-            if (!updated.has(data.data.peerId)) {
-              updated.set(data.data.peerId, {
-                name: data.data.name || `User ${data.data.peerId.slice(0, 6)}`,
-                userId: data.data.userId
-              });
-            }
-            return updated;
-          });
-        }
-        
-        const transport = recvTransportRef.current;
-        const device = deviceRef.current;
-
-        if (!transport || !device) {
-          console.log("[producer] Transport/device not ready, queuing producer");
-          pendingProducers.current.push(data);
-          return;
-        }
-
-        console.log("[producer] Sending consumer request for producer:", data.data.producerId);
-        ws.send(
-          JSON.stringify({
-            type: "consumer",
-            producerId: data.data.producerId,
-            transportId: transport.id,
-            rtpCapabilities: device.rtpCapabilities,
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true
           })
-        );
+          setLocalStream(stream)
+          if (localVideoRef.current) localVideoRef.current.srcObject = stream
+          if (localThumbRef.current) localThumbRef.current.srcObject = stream
+
+          const peersToConnect = [...pendingPeersRef.current]
+          pendingPeersRef.current = []
+          for (const peer of peersToConnect) {
+            await createPeerConnection(peer.peerId, true)
+          }
+
+          while (pendingOffersRef.current.length > 0) {
+            const pendingOffer = pendingOffersRef.current.shift()
+            if (pendingOffer) {
+              await handleOffer(pendingOffer)
+            }
+          }
+        } catch (err) {
+          console.error("Error getting user media:", err)
+        }
+
+        ws.send(JSON.stringify({ type: "getParticipants" }))
       }
 
+      if (data.type === "existingPeers") {
+        console.log("[existingPeers] Received existing peers:", data.peers)
+        for (const peer of data.peers) {
+          setRemoteParticipants(prev => {
+            const updated = new Map(prev)
+            updated.set(peer.peerId, {
+              name: peer.name || `User ${peer.peerId.slice(0, 6)}`,
+              userId: peer.userId
+            })
+            return updated
+          })
 
-        if (data.type === "consumerCreated") {
-          console.log("[consumerCreated] Received consumer:", data.data);
-
-          // skip self stream by checking producer userId against session user id
-          const peerId = producerPeerMap.current.get(data.data.producerId);
-          console.log("[consumerCreated] Mapped peerId:", peerId, "socketId:", socketIdRef.current);
-          if (socketIdRef.current && peerId === socketIdRef.current) {
-            console.log("[consumerCreated] Skipping self consumer");
-            return;
-          }
-
-          const transport = recvTransportRef.current;
-          const device = deviceRef.current;
-          if (!transport || !device) {
-            console.log("[consumerCreated] Transport or device not ready");
-            return;
-          }
-
-          try {
-            // Properly call mediasoup-client consume with correct parameters
-            // Client-side consume needs id, kind, rtpParameters from server
-            const consumer = await transport.consume({
-              id: data.data.serverConsumerId,
-              producerId: data.data.producerId,
-              kind: data.data.kind,
-              rtpParameters: data.data.rtpParameters,
-            });
-
-            console.log("[consumerCreated] Consumer created with track:", consumer.track?.id, "kind:", consumer.track?.kind);
-
-            consumer.on("transportclose", () => {
-              consumer.close();
-            });
-
-            consumer.on("trackended", () => {
-              console.log("Consumer track ended:", consumer.id);
-              setRemoteStreams(prev => {
-                const updated = new Map(prev);
-                const pId = producerPeerMap.current.get(data.data.producerId);
-                if (pId) {
-                  updated.delete(pId);
-                }
-                return updated;
-              });
-            });
-
-            // Resume the client-side consumer (mediasoup-client creates consumers paused)
-            await consumer.resume();
-            console.log("[consumerCreated] Client-side consumer resumed:", consumer.id);
-
-            setRemoteStreams(prev => {
-              const updated = new Map(prev);
-
-              const peerId = producerPeerMap.current.get(data.data.producerId);
-              if (!peerId) return prev;
-
-              const oldStream = updated.get(peerId);
-
-              // Create a new MediaStream to trigger React re-render
-              const newStream = new MediaStream();
-              
-              // Add all existing tracks of different kind
-              if (oldStream) {
-                oldStream.getTracks().forEach((t:any) => {
-                  if (t.kind !== consumer.track.kind) {
-                    newStream.addTrack(t);
-                  }
-                });
-              }
-
-              // Add the new track
-              newStream.addTrack(consumer.track);
-
-              updated.set(peerId, newStream);
-
-              console.log(`Added ${consumer.track.kind} track from peer ${peerId} to stream. Total tracks:`, newStream.getTracks().length);
-
-              return updated;
-            });
-
-            if (consumer.track?.kind === "video") {
-              consumer.track.enabled = true;
-            }
-
-            // Resume the server-side consumer
-            ws.send(JSON.stringify({
-              type: "resumeConsumer",
-              consumerId: data.data.serverConsumerId
-            }));
-
-            setActiveSpeaker(prev => prev ?? data.data.producerId);
-          } catch (error) {
-            console.error("Error consuming stream:", error);
+          if (localStream) {
+            await createPeerConnection(peer.peerId, true)
+          } else {
+            pendingPeersRef.current.push(peer)
           }
         }
+      }
+
+      if (data.type === "peerJoined") {
+        console.log("[peerJoined] New peer joined:", data.peerId)
+        setRemoteParticipants(prev => {
+          const updated = new Map(prev)
+          updated.set(data.peerId, {
+            name: data.name || `User ${data.peerId.slice(0, 6)}`,
+            userId: data.userId
+          })
+          return updated
+        })
+      }
+
+      if (data.type === "peerLeft") {
+        console.log("[peerLeft] Peer left:", data.peerId)
+        closePeerConnection(data.peerId)
+        setRemoteParticipants(prev => {
+          const updated = new Map(prev)
+          updated.delete(data.peerId)
+          return updated
+        })
+      }
+
+      if (data.type === "offer") {
+        console.log("[offer] Received offer from:", data.senderPeerId)
+        await handleOffer(data)
+      }
+
+      if (data.type === "answer") {
+        console.log("[answer] Received answer from:", data.senderPeerId)
+        const pc = peerConnectionsRef.current.get(data.senderPeerId)
+        if (pc) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+            console.log(`[WebRTC] Set remote description from answer for ${data.senderPeerId}`)
+          } catch (err) {
+            console.error("Error handling answer:", err)
+          }
+        }
+      }
+
+      if (data.type === "ice-candidate") {
+        const pc = peerConnectionsRef.current.get(data.senderPeerId)
+        if (pc && data.candidate) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate))
+          } catch (err) {
+            console.error("Error adding ICE candidate:", err)
+          }
+        }
+      }
     }
 
     ws.onclose = () => {
-      console.log("WS closed");
-
-      setConnectionStatus("Disconnected");
-      wsRef.current = null;
-      connectingRef.current=false;
+      console.log("WS closed")
+      setConnectionStatus("Disconnected")
+      wsRef.current = null
+      connectingRef.current = false
     }
 
     ws.onerror = (e) => {
-      console.error("WebSocket error:", e);
-      setConnectionStatus("Error");
-    };
-  
+      console.error("WebSocket error:", e)
+      setConnectionStatus("Error")
+    }
   }
 
-  const joinedRef = useRef(false);
+  async function handleOffer(data: any) {
+    const peerId = data.senderPeerId
+    if (!localStream) {
+      console.log("[offer] Local stream not ready, queuing offer from:", peerId)
+      pendingOffersRef.current.push(data)
+      return
+    }
+    let pc = peerConnectionsRef.current.get(peerId)
+    if (!pc) {
+      await createPeerConnection(peerId, false)
+      pc = peerConnectionsRef.current.get(peerId)
+    }
+    if (!pc) return
+
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      if (wsRef.current) {
+        wsRef.current.send(JSON.stringify({
+          type: "answer",
+          sdp: pc.localDescription,
+          targetPeerId: peerId,
+        }))
+        console.log(`[WebRTC] Sent answer to ${peerId}`)
+      }
+    } catch (err) {
+      console.error("Error handling offer:", err)
+    }
+  }
+
+  const joinedRef = useRef(false)
 
   useEffect(() => {
-
-    if (!meetingId || !session?.user?.id) return;
-
-    if (startedRef.current) return; // prevents strict mode double mount
-    startedRef.current = true;
-  
-    connectWebSocket();
-  
+    if (!meetingId || !session?.user?.id) return
+    if (joinedRef.current) return
+    joinedRef.current = true
+    connectWebSocket()
     return () => {
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
-  
-  }, []);
+      wsRef.current?.close()
+      wsRef.current = null
+    }
+  }, [])
 
   function cleanupAndExit() {
-
-  if (meetingEndedRef.current) return;
-
-  // 🔥 stop camera + mic
-  if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
-    setLocalStream(null);
-  }
-
-  // 🔥 stop screen share
-  if (screenTrackRef.current) {
-    screenTrackRef.current.stop();
-    screenTrackRef.current = null;
-  }
-
-  // 🔥 clear video elements
-  if (localVideoRef.current) localVideoRef.current.srcObject = null;
-  if (localThumbRef.current) localThumbRef.current.srcObject = null;
-
-  // 🔥 close producers safely
-  if (videoProducerRef.current && !videoProducerRef.current.closed) {
-    videoProducerRef.current.close();
-    videoProducerRef.current = null;
-  }
-
-  if (audioProducerRef.current && !audioProducerRef.current.closed) {
-    audioProducerRef.current.close();
-    audioProducerRef.current = null;
-  }
-
-  // 🔥 close transports safely
-  try {
-    if (sendTransportRef.current && !sendTransportRef.current.closed) {
-      sendTransportRef.current.close();
+    if (meetingEndedRef.current) return
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop())
+      setLocalStream(null)
     }
-  } catch (e) {
-    console.warn("send transport already closing");
-  } finally {
-    sendTransportRef.current = null;
-  }
-  
-  try {
-    if (recvTransportRef.current && !recvTransportRef.current.closed) {
-      recvTransportRef.current.close();
+    if (screenTrackRef.current) {
+      screenTrackRef.current.stop()
+      screenTrackRef.current = null
     }
-  } catch (e) {
-    console.warn("recv transport already closing");
-  } finally {
-    recvTransportRef.current = null;
+    if (localVideoRef.current) localVideoRef.current.srcObject = null
+    if (localThumbRef.current) localThumbRef.current.srcObject = null
+    peerConnectionsRef.current.forEach(pc => pc.close())
+    peerConnectionsRef.current.clear()
+    wsRef.current?.close()
+    wsRef.current = null
+    setRemoteStreams(new Map())
+    setRemoteParticipants(new Map())
+    meetingEndedRef.current = true
+    router.replace("/")
   }
-
-  // 🔥 close socket
-  wsRef.current?.close();
-  wsRef.current = null;
-
-  setRemoteStreams(new Map());
-
-producerPeerMap.current.clear();
-consumedProducersRef.current.clear();
-pendingProducers.current = [];
-pendingCallbacks.current.clear();
-
-deviceRef.current = null;
-
-producedRef.current = false;
-connectingRef.current = false;
-
-startedRef.current = false;
-meetingEndedRef.current = true;
-
-router.replace("/");
-}
 
   return (
     <div className="w-full h-screen bg-black flex flex-col">
       <div className="absolute top-4 right-4 text-white bg-black/60 px-3 py-1 rounded">
         participants:{participants}
       </div>
-
       <div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded">
         {connectionStatus}
       </div>
 
       <LayoutCall count={allStreams.length}>
         {allStreams.map(({ id, stream, isLocal, userName, userImage, isVideoOff }) => {
-          const hasVideo = stream.getVideoTracks().length > 0;
-
-          // Always show VideoTile, even without video tracks (for avatar display)
+          const hasVideo = stream.getVideoTracks().length > 0
           return (
             <VideoTile
               key={id}
@@ -806,109 +504,74 @@ router.replace("/");
               userImage={userImage}
               isLocal={isLocal}
             />
-          );
+          )
         })}
       </LayoutCall>
 
       {chatOpen && (
-  <div className="absolute right-4 top-16 w-80 h-[420px] bg-[#0f172a] text-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700">
-
-    {/* HEADER */}
-    <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-  <span className="font-semibold text-sm">💬 Chat</span>
-  <button
-    onClick={() => setChatOpen(false)}
-    className="text-gray-400 hover:text-white"
-  >
-    ✕
-  </button>
-</div>
-
-    {/* MESSAGES */}
-<div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar">
-  {messages.map((msg, i) => {
-    const isMe = msg.userId === session?.user?.id;
-
-    return (
-      <div
-        key={i}
-        className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-      >
-        <div
-          className={`px-4 py-2 rounded-2xl max-w-[75%] text-sm shadow-md ${
-            isMe
-              ? "bg-blue-600 text-white rounded-br-sm"
-              : "bg-gray-700 text-gray-100 rounded-bl-sm"
-          }`}
-        >
-          {!isMe && (
-            <div className="text-xs text-gray-400 mb-1 font-medium">
-              {msg.name}
-            </div>
-          )}
-          <div>{msg.text}</div>
+        <div className="absolute right-4 top-16 w-80 h-[420px] bg-[#0f172a] text-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700">
+          <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900">
+            <span className="font-semibold text-sm">💬 Chat</span>
+            <button onClick={() => setChatOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar">
+            {messages.map((msg, i) => {
+              const isMe = msg.userId === session?.user?.id
+              return (
+                <div key={i} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                  <div className={`px-4 py-2 rounded-2xl max-w-[75%] text-sm shadow-md ${
+                    isMe ? "bg-blue-600 text-white rounded-br-sm" : "bg-gray-700 text-gray-100 rounded-bl-sm"
+                  }`}>
+                    {!isMe && <div className="text-xs text-gray-400 mb-1 font-medium">{msg.name}</div>}
+                    <div>{msg.text}</div>
+                  </div>
+                </div>
+              )
+            })}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="p-3 border-t border-gray-700 flex gap-2 items-center">
+            <input
+              ref={chatInputRef}
+              type="text"
+              placeholder="Type a message..."
+              className="flex-1 p-2 rounded-lg bg-gray-800 text-white outline-none text-sm"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  const msg = e.currentTarget.value.trim()
+                  if (!msg) return
+                  sendMessage(msg)
+                  e.currentTarget.value = ""
+                  chatInputRef.current?.focus()
+                }
+              }}
+            />
+            <button
+              onClick={() => {
+                const input = chatInputRef.current
+                if (!input) return
+                const msg = input.value.trim()
+                if (!msg) return
+                sendMessage(msg)
+                input.value = ""
+                input.focus()
+              }}
+              className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm"
+            >
+              Send
+            </button>
+          </div>
         </div>
-      </div>
-    );
-  })}
-
-  {/* 🔥 AUTO SCROLL TARGET */}
-  <div ref={chatEndRef} />
-</div>
-
-    {/* INPUT */}
-    <div className="p-3 border-t border-gray-700 flex gap-2 items-center">
-
-  <input
-    ref={chatInputRef}
-    type="text"
-    placeholder="Type a message..."
-    className="flex-1 p-2 rounded-lg bg-gray-800 text-white outline-none text-sm"
-    onKeyDown={(e) => {
-      if (e.key === "Enter") {
-        const msg = e.currentTarget.value.trim();
-        if (!msg) return;
-
-        sendMessage(msg);
-        e.currentTarget.value = "";
-        chatInputRef.current?.focus();
-      }
-    }}
-  />
-
-  <button
-    onClick={() => {
-      const input = chatInputRef.current;
-      if (!input) return;
-
-      const msg = input.value.trim();
-      if (!msg) return;
-
-      sendMessage(msg);
-      input.value = "";
-      input.focus();
-    }}
-    className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm"
-  >
-    Send
-  </button>
-
-</div>
-  </div>
-)}
-
+      )}
 
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full">
-
-       <button
+        <button
           onClick={() => {
-            if (!localStream) return;
-
-            const audioTrack = localStream.getAudioTracks()[0];
-            if (!audioTrack) return;
-
-            audioTrack.enabled = !audioTrack.enabled;
-            setIsMuted(!audioTrack.enabled);
+            if (!localStream) return
+            const audioTrack = localStream.getAudioTracks()[0]
+            if (!audioTrack) return
+            audioTrack.enabled = !audioTrack.enabled
+            setIsMuted(!audioTrack.enabled)
           }}
           className="bg-gray-700 p-3 rounded-full text-white"
         >
@@ -916,23 +579,20 @@ router.replace("/");
         </button>
 
         <button
-  onClick={() => {
-    const track = localStream?.getVideoTracks()[0];
-    if (!track) return;
-
-    track.enabled = !track.enabled;
-    setCameraOff(!track.enabled);
-  }}
-  className="bg-gray-700 p-3 rounded-full text-white"
->
-  {cameraOff ? <FaVideoSlash /> : <FaVideo />}
-</button>
+          onClick={() => {
+            const track = localStream?.getVideoTracks()[0]
+            if (!track) return
+            track.enabled = !track.enabled
+            setCameraOff(!track.enabled)
+          }}
+          className="bg-gray-700 p-3 rounded-full text-white"
+        >
+          {cameraOff ? <FaVideoSlash /> : <FaVideo />}
+        </button>
 
         <button
           onClick={() => setChatOpen(prev => !prev)}
-          className={`p-3 rounded-full text-white transition ${
-            chatOpen ? "bg-blue-600" : "bg-gray-700"
-          }`}
+          className={`p-3 rounded-full text-white transition ${chatOpen ? "bg-blue-600" : "bg-gray-700"}`}
         >
           <MessageSquare size={20} />
         </button>
@@ -947,31 +607,22 @@ router.replace("/");
         <button
           onClick={async () => {
             try {
-          
-              // only host should end room
               if (session?.user?.id === hostId) {
                 await fetch("/api/meeting/end", {
                   method: "POST",
-                  headers: {
-                    "Content-Type":"application/json"
-                  },
-                  body: JSON.stringify({
-                    meetingId
-                  })
-                });
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ meetingId })
+                })
               }
-          
             } catch(e) {
-              console.error(e);
+              console.error(e)
             }
-          
-            cleanupAndExit();
+            cleanupAndExit()
           }}
           className="bg-red-600 p-3 rounded-full text-white"
         >
           <FaPhoneSlash />
         </button>
-
       </div>
     </div>
   )
