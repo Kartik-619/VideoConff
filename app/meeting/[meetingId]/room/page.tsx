@@ -72,6 +72,7 @@ export default function MeetingRoom() {
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const pendingOffersRef = useRef<PendingOffer[]>([])
   const pendingPeersRef = useRef<PendingPeer[]>([])
+  const pendingIceCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const localStreamReadyRef = useRef(false)
   const reconnectedRef = useRef(false)
 
@@ -92,7 +93,8 @@ export default function MeetingRoom() {
     remoteStreams.forEach((stream, peerId) => {
       if (peerId === socketIdRef.current) return
       const participant = remoteParticipants.get(peerId)
-      const hasVideo = stream.getVideoTracks().length > 0 && !stream.getVideoTracks()[0].muted
+      const videoTracks = stream.getVideoTracks()
+      const hasVideo = videoTracks.length > 0 && videoTracks[0].enabled
       result.push({
         id: peerId,
         stream,
@@ -155,8 +157,8 @@ export default function MeetingRoom() {
 
     pc.ontrack = (event) => {
       console.log(`[WebRTC] Received track from ${peerId}:`, event.track.kind)
-      const [remoteStream] = event.streams
-      if (remoteStream) {
+      if (event.streams && event.streams[0]) {
+        const remoteStream = event.streams[0]
         setRemoteStreams(prev => {
           const updated = new Map(prev)
           updated.set(peerId, remoteStream)
@@ -225,6 +227,19 @@ export default function MeetingRoom() {
           console.warn("Track already added:", e)
         }
       })
+    }
+
+    const bufferedCandidates = pendingIceCandidatesRef.current.get(peerId)
+    if (bufferedCandidates && bufferedCandidates.length > 0) {
+      console.log(`[WebRTC] Flushing ${bufferedCandidates.length} buffered ICE candidates for ${peerId}`)
+      for (const candidate of bufferedCandidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        } catch (err) {
+          console.error("Error adding buffered ICE candidate:", err)
+        }
+      }
+      pendingIceCandidatesRef.current.delete(peerId)
     }
 
     if (isInitiator) {
@@ -387,6 +402,7 @@ export default function MeetingRoom() {
             peerConnectionsRef.current.clear()
             pendingOffersRef.current = []
             pendingPeersRef.current = []
+            pendingIceCandidatesRef.current.clear()
             reconnectAttempts.current = 0
 
             try {
@@ -406,8 +422,13 @@ export default function MeetingRoom() {
               pendingPeersRef.current = []
               
               for (const peer of peersToConnect) {
-                console.log(`[WebRTC] Connecting to pending peer: ${peer.peerId}`)
-                await createPeerConnection(peer.peerId, true)
+                const iAmHigher = (socketIdRef.current || "") > peer.peerId
+                console.log(`[WebRTC] Processing pending peer ${peer.peerId}, I am higher: ${iAmHigher}`)
+                if (iAmHigher) {
+                  await createPeerConnection(peer.peerId, true)
+                } else {
+                  createPeerConnection(peer.peerId, false)
+                }
               }
 
               while (pendingOffersRef.current.length > 0) {
@@ -427,6 +448,7 @@ export default function MeetingRoom() {
 
           if (data.type === "existingPeers") {
             console.log("[existingPeers] Received:", data.peers)
+            const myId = socketIdRef.current
             for (const peer of data.peers) {
               setRemoteParticipants(prev => {
                 const updated = new Map(prev)
@@ -438,8 +460,15 @@ export default function MeetingRoom() {
               })
 
               if (localStreamReadyRef.current) {
-                console.log(`[WebRTC] Creating PC for existing peer: ${peer.peerId}`)
-                await createPeerConnection(peer.peerId, true)
+                const iAmHigher = (myId || "") > peer.peerId
+                console.log(`[WebRTC] Peer ${peer.peerId}, I am higher: ${iAmHigher}`)
+                if (iAmHigher) {
+                  console.log(`[WebRTC] Creating PC (initiator) for existing peer: ${peer.peerId}`)
+                  await createPeerConnection(peer.peerId, true)
+                } else {
+                  console.log(`[WebRTC] Creating PC (non-initiator) for existing peer: ${peer.peerId}`)
+                  createPeerConnection(peer.peerId, false)
+                }
               } else {
                 console.log(`[WebRTC] Queueing existing peer: ${peer.peerId}`)
                 pendingPeersRef.current.push(peer)
@@ -459,8 +488,17 @@ export default function MeetingRoom() {
             })
             
             if (localStreamReadyRef.current) {
-              console.log(`[WebRTC] Creating PC for new peer: ${data.peerId}`)
-              await createPeerConnection(data.peerId, true)
+              const newPeerId = data.peerId
+              const myId = socketIdRef.current
+              const theyAreNewer = newPeerId > (myId || "")
+              
+              if (!theyAreNewer) {
+                console.log(`[WebRTC] I have higher peerId, initiating to: ${newPeerId}`)
+                await createPeerConnection(newPeerId, true)
+              } else {
+                console.log(`[WebRTC] Pre-creating PC for ${newPeerId} (waiting for their offer)`)
+                createPeerConnection(newPeerId, false)
+              }
             } else {
               console.log(`[WebRTC] Queueing new peer: ${data.peerId}`)
               pendingPeersRef.current.push({
@@ -499,12 +537,8 @@ export default function MeetingRoom() {
             const pc = peerConnectionsRef.current.get(data.senderPeerId)
             if (pc) {
               try {
-                if (pc.signalingState === "stable" || pc.signalingState === "have-local-offer") {
-                  await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
-                  console.log(`[WebRTC] Set remote description from ${data.senderPeerId}`)
-                } else {
-                  console.warn(`[WebRTC] Cannot set remote description, state: ${pc.signalingState}`)
-                }
+                await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+                console.log(`[WebRTC] Set remote description from ${data.senderPeerId}, state: ${pc.signalingState}`)
               } catch (err) {
                 console.error("Error handling answer:", err)
               }
@@ -521,6 +555,12 @@ export default function MeetingRoom() {
               } catch (err) {
                 console.error("Error adding ICE candidate:", err)
               }
+            } else if (data.candidate) {
+              if (!pendingIceCandidatesRef.current.has(data.senderPeerId)) {
+                pendingIceCandidatesRef.current.set(data.senderPeerId, [])
+              }
+              pendingIceCandidatesRef.current.get(data.senderPeerId)!.push(data.candidate)
+              console.log(`[ICE] Buffered candidate for ${data.senderPeerId} (PC not ready yet)`)
             }
           }
         } catch (err) {
