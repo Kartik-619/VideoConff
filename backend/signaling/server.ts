@@ -169,6 +169,38 @@ function broadcastMeetingEnded(roomId: string) {
 
 /* ---------------- HTTP ---------------- */
 
+app.post("/leave", async (req, res) => {
+  const { meetingId, userId } = req.body;
+  if (!meetingId || !userId) {
+    return res.status(400).json({ error: "meetingId and userId required" });
+  }
+
+  const room = rooms.get(meetingId);
+  if (room) {
+    for (const [peerId, peer] of room.peers.entries()) {
+      if (peer.userId === userId) {
+        (peer.socket as any).__replaced = true;
+        peer.socket.close();
+        room.peers.delete(peerId);
+        await redis.srem(`meeting:${meetingId}:participants`, userId);
+        room.peers.forEach((otherPeer) => {
+          safeSend(otherPeer.socket, {
+            type: "peerLeft",
+            peerId: peerId,
+          });
+        });
+        await broadcastLobby(meetingId);
+        if (room.peers.size === 0) {
+          scheduleRoomDeletion(meetingId);
+        }
+        break;
+      }
+    }
+  }
+
+  res.json({ ok: true });
+});
+
 app.post("/endMeeting", (req, res) => {
   broadcastMeetingEnded(req.body.meetingId);
   res.json({ ok: true });

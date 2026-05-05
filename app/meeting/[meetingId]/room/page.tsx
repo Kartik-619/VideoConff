@@ -30,6 +30,17 @@ interface PeerInfo {
   userId: string
 }
 
+interface PendingOffer {
+  senderPeerId: string
+  sdp: RTCSessionDescriptionInit
+}
+
+interface PendingPeer {
+  peerId: string
+  name: string
+  userId: string
+}
+
 export default function MeetingRoom() {
   const params = useParams()
   const meetingId = params.meetingId as string
@@ -38,6 +49,7 @@ export default function MeetingRoom() {
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
+  const maxReconnectAttempts = 10
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localThumbRef = useRef<HTMLVideoElement>(null)
@@ -58,8 +70,10 @@ export default function MeetingRoom() {
   const [messages, setMessages] = useState<any[]>([])
   const joinSentRef = useRef(false)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
-  const pendingOffersRef = useRef<any[]>([])
-  const pendingPeersRef = useRef<Array<{peerId: string; name: string; userId: string}>>([])
+  const pendingOffersRef = useRef<PendingOffer[]>([])
+  const pendingPeersRef = useRef<PendingPeer[]>([])
+  const localStreamReadyRef = useRef(false)
+  const reconnectedRef = useRef(false)
 
   const allStreams = useMemo(() => {
     const result: StreamInfo[] = []
@@ -78,7 +92,7 @@ export default function MeetingRoom() {
     remoteStreams.forEach((stream, peerId) => {
       if (peerId === socketIdRef.current) return
       const participant = remoteParticipants.get(peerId)
-      const hasVideo = stream.getVideoTracks().length > 0
+      const hasVideo = stream.getVideoTracks().length > 0 && !stream.getVideoTracks()[0].muted
       result.push({
         id: peerId,
         stream,
@@ -122,14 +136,19 @@ export default function MeetingRoom() {
 
   async function createPeerConnection(peerId: string, isInitiator: boolean) {
     if (peerConnectionsRef.current.has(peerId)) {
-      closePeerConnection(peerId)
+      console.log(`[WebRTC] PC already exists for ${peerId}, reusing`)
+      return peerConnectionsRef.current.get(peerId)!
     }
 
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
+      ],
+      iceCandidatePoolSize: 10
     })
 
     peerConnectionsRef.current.set(peerId, pc)
@@ -147,7 +166,7 @@ export default function MeetingRoom() {
     }
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && wsRef.current) {
+      if (event.candidate && wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: "ice-candidate",
           candidate: event.candidate,
@@ -159,22 +178,60 @@ export default function MeetingRoom() {
     pc.onconnectionstatechange = () => {
       console.log(`[WebRTC] Connection state for ${peerId}:`, pc.connectionState)
       if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-        console.log(`[WebRTC] Connection lost with ${peerId}`)
-        closePeerConnection(peerId)
+        console.log(`[WebRTC] Connection lost with ${peerId}, attempting reconnect`)
+        setRemoteStreams(prev => {
+          const updated = new Map(prev)
+          updated.delete(peerId)
+          return updated
+        })
+        peerConnectionsRef.current.delete(peerId)
+        if (localStream && !reconnectedRef.current) {
+          reconnectedRef.current = true
+          setTimeout(() => {
+            reconnectedRef.current = false
+            createPeerConnection(peerId, true)
+          }, 2000)
+        }
+      }
+    }
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC] ICE state for ${peerId}:`, pc.iceConnectionState)
+    }
+
+    pc.onnegotiationneeded = async () => {
+      console.log(`[WebRTC] Negotiation needed for ${peerId}`)
+      try {
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
+        await pc.setLocalDescription(offer)
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: "offer",
+            sdp: pc.localDescription,
+            targetPeerId: peerId,
+          }))
+          console.log(`[WebRTC] Sent renegotiation offer to ${peerId}`)
+        }
+      } catch (err) {
+        console.error("Error during renegotiation:", err)
       }
     }
 
     if (localStream) {
       localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream)
+        try {
+          pc.addTrack(track, localStream)
+        } catch (e) {
+          console.warn("Track already added:", e)
+        }
       })
     }
 
     if (isInitiator) {
       try {
-        const offer = await pc.createOffer()
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
         await pc.setLocalDescription(offer)
-        if (wsRef.current) {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
             type: "offer",
             sdp: pc.localDescription,
@@ -208,10 +265,22 @@ export default function MeetingRoom() {
       if (screenSharing) {
         screenTrackRef.current?.stop()
         setScreenSharing(false)
+        const cameraTrack = localStream?.getVideoTracks()[0]
+        if (cameraTrack) {
+          peerConnectionsRef.current.forEach((pc) => {
+            const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+            if (sender) {
+              sender.replaceTrack(cameraTrack)
+            }
+          })
+        }
         return
       }
 
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+      const stream = await navigator.mediaDevices.getDisplayMedia({ 
+        video: { cursor: "always" },
+        audio: false
+      })
       const track = stream.getVideoTracks()[0]
       screenTrackRef.current = track
       setScreenSharing(true)
@@ -237,7 +306,7 @@ export default function MeetingRoom() {
         }
       }
     } catch (err) {
-      console.error(err)
+      console.error("Screen share error:", err)
     }
   }
 
@@ -253,196 +322,271 @@ export default function MeetingRoom() {
     }
     connectingRef.current = true
 
-    const res = await fetch("/api/ws-token")
-    if (!res.ok) {
-      console.error("Failed to get WS token")
-      connectingRef.current = false
-      return
-    }
-
-    const { token } = await res.json()
-    const wsUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https', 'wss').replace('http', 'ws') || 'ws://localhost:8080'}?token=${token}`
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
-    joinSentRef.current = false
-
-    ws.onopen = () => {
-      if (joinSentRef.current) return
-      joinSentRef.current = true
-      ws.send(JSON.stringify({
-        type: "join",
-        roomId: meetingId
-      }))
-    }
-
-    ws.onmessage = async (e) => {
-      const data = JSON.parse(e.data)
-
-      if (data.type === "lobbyUpdate") {
-        setParticipants(data.participants.length)
+    try {
+      const res = await fetch("/api/ws-token")
+      if (!res.ok) {
+        console.error("Failed to get WS token")
+        connectingRef.current = false
+        return
       }
 
-      if (data.type === "chatMessage") {
-        setMessages(prev => [
-          ...prev,
-          {
-            text: data.data.message,
-            name: data.data.name,
-            userId: data.data.userId,
-            timestamp: data.data.timestamp,
-          }
-        ])
-      }
+      const { token } = await res.json()
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080'
+      const wsUrl = `${backendUrl.replace(/^https/, 'wss').replace(/^http/, 'ws')}?token=${token}`
+      
+      console.log(`[WS] Connecting to: ${wsUrl}`)
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+      joinSentRef.current = false
 
-      if (data.type === "meetingEnded") {
-        if (meetingEndedRef.current) return
-        toast.error("Meeting ended by host")
-        cleanupAndExit()
-        wsRef.current?.close()
-      }
-
-      if (data.type === "joined") {
-        socketIdRef.current = data.peerId
-        setHostId(data.hostId)
-        setRemoteStreams(new Map())
-        setRemoteParticipants(new Map())
-        peerConnectionsRef.current.clear()
-        pendingOffersRef.current = []
-        pendingPeersRef.current = []
+      ws.onopen = () => {
+        console.log("[WS] Connected")
+        if (joinSentRef.current) return
+        joinSentRef.current = true
+        setConnectionStatus("Connected")
         reconnectAttempts.current = 0
+        ws.send(JSON.stringify({
+          type: "join",
+          roomId: meetingId
+        }))
+      }
 
+      ws.onmessage = async (e) => {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: true
-          })
-          setLocalStream(stream)
-          if (localVideoRef.current) localVideoRef.current.srcObject = stream
-          if (localThumbRef.current) localThumbRef.current.srcObject = stream
+          const data = JSON.parse(e.data)
 
-          const peersToConnect = [...pendingPeersRef.current]
-          pendingPeersRef.current = []
-          for (const peer of peersToConnect) {
-            await createPeerConnection(peer.peerId, true)
+          if (data.type === "lobbyUpdate") {
+            setParticipants(data.participants.length)
           }
 
-          while (pendingOffersRef.current.length > 0) {
-            const pendingOffer = pendingOffersRef.current.shift()
-            if (pendingOffer) {
-              await handleOffer(pendingOffer)
+          if (data.type === "chatMessage") {
+            setMessages(prev => [
+              ...prev,
+              {
+                text: data.data.message,
+                name: data.data.name,
+                userId: data.data.userId,
+                timestamp: data.data.timestamp,
+              }
+            ])
+          }
+
+          if (data.type === "meetingEnded") {
+            if (meetingEndedRef.current) return
+            toast.error("Meeting ended by host")
+            cleanupAndExit()
+            wsRef.current?.close()
+          }
+
+          if (data.type === "joined") {
+            console.log("[joined] Socket ID:", data.peerId, "Host:", data.hostId)
+            socketIdRef.current = data.peerId
+            setHostId(data.hostId)
+            setRemoteStreams(new Map())
+            setRemoteParticipants(new Map())
+            peerConnectionsRef.current.clear()
+            pendingOffersRef.current = []
+            pendingPeersRef.current = []
+            reconnectAttempts.current = 0
+
+            try {
+              const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: { echoCancellation: true, noiseSuppression: true }
+              })
+              
+              console.log("[Media] Got local stream with tracks:", stream.getTracks().map(t => `${t.kind}:${t.label}`))
+              setLocalStream(stream)
+              localStreamReadyRef.current = true
+              
+              if (localVideoRef.current) localVideoRef.current.srcObject = stream
+              if (localThumbRef.current) localThumbRef.current.srcObject = stream
+
+              const peersToConnect = [...pendingPeersRef.current]
+              pendingPeersRef.current = []
+              
+              for (const peer of peersToConnect) {
+                console.log(`[WebRTC] Connecting to pending peer: ${peer.peerId}`)
+                await createPeerConnection(peer.peerId, true)
+              }
+
+              while (pendingOffersRef.current.length > 0) {
+                const pendingOffer = pendingOffersRef.current.shift()
+                if (pendingOffer) {
+                  console.log(`[WebRTC] Processing pending offer from: ${pendingOffer.senderPeerId}`)
+                  await handleOffer(pendingOffer)
+                }
+              }
+            } catch (err) {
+              console.error("Error getting user media:", err)
+              toast.error("Failed to access camera/microphone")
+            }
+
+            ws.send(JSON.stringify({ type: "getParticipants" }))
+          }
+
+          if (data.type === "existingPeers") {
+            console.log("[existingPeers] Received:", data.peers)
+            for (const peer of data.peers) {
+              setRemoteParticipants(prev => {
+                const updated = new Map(prev)
+                updated.set(peer.peerId, {
+                  name: peer.name || `User ${peer.peerId.slice(0, 6)}`,
+                  userId: peer.userId
+                })
+                return updated
+              })
+
+              if (localStreamReadyRef.current) {
+                console.log(`[WebRTC] Creating PC for existing peer: ${peer.peerId}`)
+                await createPeerConnection(peer.peerId, true)
+              } else {
+                console.log(`[WebRTC] Queueing existing peer: ${peer.peerId}`)
+                pendingPeersRef.current.push(peer)
+              }
+            }
+          }
+
+          if (data.type === "peerJoined") {
+            console.log("[peerJoined] New peer:", data.peerId, data.name)
+            setRemoteParticipants(prev => {
+              const updated = new Map(prev)
+              updated.set(data.peerId, {
+                name: data.name || `User ${data.peerId.slice(0, 6)}`,
+                userId: data.userId
+              })
+              return updated
+            })
+            
+            if (localStreamReadyRef.current) {
+              console.log(`[WebRTC] Creating PC for new peer: ${data.peerId}`)
+              await createPeerConnection(data.peerId, true)
+            } else {
+              console.log(`[WebRTC] Queueing new peer: ${data.peerId}`)
+              pendingPeersRef.current.push({
+                peerId: data.peerId,
+                name: data.name,
+                userId: data.userId
+              })
+            }
+          }
+
+          if (data.type === "peerLeft") {
+            console.log("[peerLeft] Peer left:", data.peerId)
+            closePeerConnection(data.peerId)
+            setRemoteParticipants(prev => {
+              const updated = new Map(prev)
+              updated.delete(data.peerId)
+              return updated
+            })
+          }
+
+          if (data.type === "offer") {
+            console.log("[offer] Received from:", data.senderPeerId)
+            if (localStreamReadyRef.current) {
+              await handleOffer(data)
+            } else {
+              console.log("[offer] Queuing (stream not ready)")
+              pendingOffersRef.current.push({
+                senderPeerId: data.senderPeerId,
+                sdp: data.sdp
+              })
+            }
+          }
+
+          if (data.type === "answer") {
+            console.log("[answer] Received from:", data.senderPeerId)
+            const pc = peerConnectionsRef.current.get(data.senderPeerId)
+            if (pc) {
+              try {
+                if (pc.signalingState === "stable" || pc.signalingState === "have-local-offer") {
+                  await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+                  console.log(`[WebRTC] Set remote description from ${data.senderPeerId}`)
+                } else {
+                  console.warn(`[WebRTC] Cannot set remote description, state: ${pc.signalingState}`)
+                }
+              } catch (err) {
+                console.error("Error handling answer:", err)
+              }
+            } else {
+              console.warn(`[WebRTC] No PC found for answer from ${data.senderPeerId}`)
+            }
+          }
+
+          if (data.type === "ice-candidate") {
+            const pc = peerConnectionsRef.current.get(data.senderPeerId)
+            if (pc && data.candidate) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(data.candidate))
+              } catch (err) {
+                console.error("Error adding ICE candidate:", err)
+              }
             }
           }
         } catch (err) {
-          console.error("Error getting user media:", err)
-        }
-
-        ws.send(JSON.stringify({ type: "getParticipants" }))
-      }
-
-      if (data.type === "existingPeers") {
-        console.log("[existingPeers] Received existing peers:", data.peers)
-        for (const peer of data.peers) {
-          setRemoteParticipants(prev => {
-            const updated = new Map(prev)
-            updated.set(peer.peerId, {
-              name: peer.name || `User ${peer.peerId.slice(0, 6)}`,
-              userId: peer.userId
-            })
-            return updated
-          })
-
-          if (localStream) {
-            await createPeerConnection(peer.peerId, true)
-          } else {
-            pendingPeersRef.current.push(peer)
-          }
+          console.error("WS message parse error:", err)
         }
       }
 
-      if (data.type === "peerJoined") {
-        console.log("[peerJoined] New peer joined:", data.peerId)
-        setRemoteParticipants(prev => {
-          const updated = new Map(prev)
-          updated.set(data.peerId, {
-            name: data.name || `User ${data.peerId.slice(0, 6)}`,
-            userId: data.userId
-          })
-          return updated
-        })
-      }
-
-      if (data.type === "peerLeft") {
-        console.log("[peerLeft] Peer left:", data.peerId)
-        closePeerConnection(data.peerId)
-        setRemoteParticipants(prev => {
-          const updated = new Map(prev)
-          updated.delete(data.peerId)
-          return updated
-        })
-      }
-
-      if (data.type === "offer") {
-        console.log("[offer] Received offer from:", data.senderPeerId)
-        await handleOffer(data)
-      }
-
-      if (data.type === "answer") {
-        console.log("[answer] Received answer from:", data.senderPeerId)
-        const pc = peerConnectionsRef.current.get(data.senderPeerId)
-        if (pc) {
-          try {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
-            console.log(`[WebRTC] Set remote description from answer for ${data.senderPeerId}`)
-          } catch (err) {
-            console.error("Error handling answer:", err)
-          }
+      ws.onclose = (event) => {
+        console.log(`[WS] Closed: code=${event.code}, reason=${event.reason}`)
+        wsRef.current = null
+        connectingRef.current = false
+        
+        if (meetingEndedRef.current) return
+        
+        setConnectionStatus("Disconnected")
+        
+        if (reconnectAttempts.current < maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 10000)
+          console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current + 1})`)
+          setConnectionStatus(`Reconnecting... (${reconnectAttempts.current + 1})`)
+          
+          setTimeout(() => {
+            reconnectAttempts.current++
+            connectWebSocket()
+          }, delay)
+        } else {
+          setConnectionStatus("Connection lost")
+          toast.error("Lost connection to server")
         }
       }
 
-      if (data.type === "ice-candidate") {
-        const pc = peerConnectionsRef.current.get(data.senderPeerId)
-        if (pc && data.candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.candidate))
-          } catch (err) {
-            console.error("Error adding ICE candidate:", err)
-          }
-        }
+      ws.onerror = (e) => {
+        console.error("[WS] Error:", e)
+        setConnectionStatus("Error")
       }
-    }
-
-    ws.onclose = () => {
-      console.log("WS closed")
-      setConnectionStatus("Disconnected")
-      wsRef.current = null
+    } catch (err) {
+      console.error("WebSocket setup error:", err)
       connectingRef.current = false
-    }
-
-    ws.onerror = (e) => {
-      console.error("WebSocket error:", e)
-      setConnectionStatus("Error")
     }
   }
 
-  async function handleOffer(data: any) {
+  async function handleOffer(data: { senderPeerId: string; sdp: RTCSessionDescriptionInit }) {
     const peerId = data.senderPeerId
-    if (!localStream) {
+    if (!localStreamReadyRef.current) {
       console.log("[offer] Local stream not ready, queuing offer from:", peerId)
       pendingOffersRef.current.push(data)
       return
     }
+    
     let pc = peerConnectionsRef.current.get(peerId)
     if (!pc) {
-      await createPeerConnection(peerId, false)
-      pc = peerConnectionsRef.current.get(peerId)
+      pc = await createPeerConnection(peerId, false)
     }
     if (!pc) return
 
     try {
+      if (pc.signalingState === "have-local-offer") {
+        console.log(`[WebRTC] Rolling back local offer for ${peerId}`)
+        await pc.setLocalDescription({ type: "rollback" } as RTCSessionDescription)
+      }
+      
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      if (wsRef.current) {
+      
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({
           type: "answer",
           sdp: pc.localDescription,
@@ -461,7 +605,9 @@ export default function MeetingRoom() {
     if (!meetingId || !session?.user?.id) return
     if (joinedRef.current) return
     joinedRef.current = true
+    
     connectWebSocket()
+    
     return () => {
       wsRef.current?.close()
       wsRef.current = null
@@ -474,6 +620,7 @@ export default function MeetingRoom() {
       localStream.getTracks().forEach(track => track.stop())
       setLocalStream(null)
     }
+    localStreamReadyRef.current = false
     if (screenTrackRef.current) {
       screenTrackRef.current.stop()
       screenTrackRef.current = null
@@ -492,16 +639,16 @@ export default function MeetingRoom() {
 
   return (
     <div className="w-full h-screen bg-black flex flex-col">
-      <div className="absolute top-4 right-4 text-white bg-black/60 px-3 py-1 rounded">
+      <div className="absolute top-4 right-4 text-white bg-black/60 px-3 py-1 rounded z-10">
         participants:{participants}
       </div>
-      <div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded">
+      <div className="absolute top-4 left-4 text-white bg-black/60 px-3 py-1 rounded z-10">
         {connectionStatus}
       </div>
 
       <LayoutCall count={allStreams.length}>
         {allStreams.map(({ id, stream, isLocal, userName, userImage, isVideoOff }) => {
-          const hasVideo = stream.getVideoTracks().length > 0
+          const hasVideo = stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled
           return (
             <VideoTile
               key={id}
@@ -517,9 +664,9 @@ export default function MeetingRoom() {
       </LayoutCall>
 
       {chatOpen && (
-        <div className="absolute right-4 top-16 w-80 h-[420px] bg-[#0f172a] text-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700">
+        <div className="absolute right-4 top-16 w-80 h-[420px] bg-[#0f172a] text-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700 z-10">
           <div className="p-3 border-b border-gray-700 flex justify-between items-center bg-gray-900">
-            <span className="font-semibold text-sm">💬 Chat</span>
+            <span className="font-semibold text-sm"> Chat</span>
             <button onClick={() => setChatOpen(false)} className="text-gray-400 hover:text-white">✕</button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar">
@@ -572,7 +719,7 @@ export default function MeetingRoom() {
         </div>
       )}
 
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 bg-black/70 px-8 py-4 rounded-full z-10">
         <button
           onClick={() => {
             if (!localStream) return
@@ -581,7 +728,7 @@ export default function MeetingRoom() {
             audioTrack.enabled = !audioTrack.enabled
             setIsMuted(!audioTrack.enabled)
           }}
-          className="bg-gray-700 p-3 rounded-full text-white"
+          className="bg-gray-700 p-3 rounded-full text-white hover:bg-gray-600 transition"
         >
           {isMuted ? <FaMicrophoneSlash /> : <FaMicrophone />}
         </button>
@@ -593,21 +740,21 @@ export default function MeetingRoom() {
             track.enabled = !track.enabled
             setCameraOff(!track.enabled)
           }}
-          className="bg-gray-700 p-3 rounded-full text-white"
+          className="bg-gray-700 p-3 rounded-full text-white hover:bg-gray-600 transition"
         >
           {cameraOff ? <FaVideoSlash /> : <FaVideo />}
         </button>
 
         <button
           onClick={() => setChatOpen(prev => !prev)}
-          className={`p-3 rounded-full text-white transition ${chatOpen ? "bg-blue-600" : "bg-gray-700"}`}
+          className={`p-3 rounded-full text-white transition ${chatOpen ? "bg-blue-600" : "bg-gray-700 hover:bg-gray-600"}`}
         >
           <MessageSquare size={20} />
         </button>
 
         <button
           onClick={startScreenShare}
-          className={`p-3 rounded-full text-white ${screenSharing ? "bg-green-600" : "bg-blue-600"}`}
+          className={`p-3 rounded-full text-white transition ${screenSharing ? "bg-green-600 hover:bg-green-700" : "bg-blue-600 hover:bg-blue-700"}`}
         >
           <FaDesktop />
         </button>
@@ -627,7 +774,7 @@ export default function MeetingRoom() {
             }
             cleanupAndExit()
           }}
-          className="bg-red-600 p-3 rounded-full text-white"
+          className="bg-red-600 p-3 rounded-full text-white hover:bg-red-700 transition"
         >
           <FaPhoneSlash />
         </button>

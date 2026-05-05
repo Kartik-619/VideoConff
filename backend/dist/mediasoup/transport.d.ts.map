@@ -1,1 +1,0 @@
-{"version":3,"file":"transport.d.ts","sourceRoot":"","sources":["../../mediasoup/transport.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,SAAS,MAAM,WAAW,CAAC;AAKvC,eAAO,MAAM,eAAe,GAE1B,QAAQ,SAAS,CAAC,KAAK,CAAC,MAAM,EAC9B,cAAc,SAAS,CAAC,KAAK,CAAC,YAAY,KACxC,OAAO,CAAC,SAAS,CAAC,KAAK,CAAC,eAAe,CAO1C,CAAC"}
