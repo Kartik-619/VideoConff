@@ -16,6 +16,20 @@ import {
 } from "react-icons/fa"
 import { MessageSquare } from "lucide-react"
 
+interface StreamInfo {
+  id: string
+  stream: MediaStream
+  isLocal: boolean
+  userName?: string
+  userImage?: string
+  isVideoOff?: boolean
+}
+
+interface PeerInfo {
+  name: string
+  userId: string
+}
+
 export default function MeetingRoom() {
   const params = useParams()
   const meetingId = params.meetingId as string
@@ -32,7 +46,7 @@ export default function MeetingRoom() {
   const chatInputRef = useRef<HTMLInputElement | null>(null)
   const chatEndRef = useRef<HTMLDivElement | null>(null)
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map())
-  const [remoteParticipants, setRemoteParticipants] = useState<Map<string, { name: string; userId: string }>>(new Map())
+  const [remoteParticipants, setRemoteParticipants] = useState<Map<string, PeerInfo>>(new Map())
   const [isMuted, setIsMuted] = useState(false)
   const [cameraOff, setCameraOff] = useState(false)
   const meetingEndedRef = useRef(false)
@@ -48,14 +62,7 @@ export default function MeetingRoom() {
   const pendingPeersRef = useRef<Array<{peerId: string; name: string; userId: string}>>([])
 
   const allStreams = useMemo(() => {
-    const result: { 
-      id: string; 
-      stream: MediaStream; 
-      isLocal: boolean;
-      userName?: string;
-      userImage?: string;
-      isVideoOff?: boolean;
-    }[] = []
+    const result: StreamInfo[] = []
 
     if (localStream) {
       result.push({
@@ -254,7 +261,8 @@ export default function MeetingRoom() {
     }
 
     const { token } = await res.json()
-    const ws = new WebSocket(`${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https', 'wss').replace('http', 'ws') || 'ws://localhost:8080'}?token=${token}`)
+    const wsUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https', 'wss').replace('http', 'ws') || 'ws://localhost:8080'}?token=${token}`
+    const ws = new WebSocket(wsUrl)
     wsRef.current = ws
     joinSentRef.current = false
 
