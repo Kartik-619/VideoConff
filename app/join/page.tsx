@@ -64,9 +64,9 @@ export default function JoinMeetingPage() {
       const data = await res.json();
       router.push(`/meeting/${data.meetingId}`);
 
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
+     } catch (err) {
+       setError(err instanceof Error ? err.message : 'An error occurred');
+     } finally {
       setLoading(false);
     }
   };

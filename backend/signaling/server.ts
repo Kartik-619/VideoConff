@@ -186,7 +186,7 @@ app.post("/leave", async (req, res) => {
     for (const existingPeerId of peersToRemove) {
       const peer = room.peers.get(existingPeerId);
       if (!peer) continue;
-      (peer.socket as any).__replaced = true;
+              (peer.socket as WebSocket & { __replaced?: boolean }).__replaced = true;
       peer.socket.close();
       room.peers.delete(existingPeerId);
     }
@@ -228,7 +228,7 @@ app.post("/endMeeting", async (req, res) => {
   if (room) {
     room.peers.forEach((peer) => {
       safeSend(peer.socket, { type: "meetingEnded" });
-      (peer.socket as any).__replaced = true;
+              (peer.socket as WebSocket & { __replaced?: boolean }).__replaced = true;
       peer.socket.close();
     });
     room.peers.clear();
@@ -310,7 +310,7 @@ async function startServer() {
             if (!token) return ws.close();
 
             try {
-              const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET!) as any;
+              const decoded = jwt.verify(token, process.env.NEXTAUTH_SECRET!) as { id: string };
               userId = decoded.id;
             } catch (err) {
               return ws.close();

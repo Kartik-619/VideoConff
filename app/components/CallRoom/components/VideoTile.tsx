@@ -30,7 +30,7 @@ export default function VideoTile({
         console.log("Autoplay blocked");
         });
     }
-    }, [stream, stream?.getTracks().length]);
+    }, [stream]);
 
   return (
     <div className="relative w-full h-full bg-black rounded-xl overflow-hidden">

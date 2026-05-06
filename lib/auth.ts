@@ -97,7 +97,7 @@ export const authOptions: NextAuthOptions = {
       }
 
       // Attach DB id to session user
-      (user as any).id = existingUser.id;
+      user.id = existingUser.id;
 
       return true;
     },
@@ -106,7 +106,7 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
 
       if (user) {
-        token.id = (user as any).id;
+        token.id = user.id;
       }
 
       return token;
@@ -116,7 +116,7 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
 
       if (session.user) {
-        (session.user as any).id = token.id;
+        session.user.id = token.id as string;
         session.user.image = token.picture as string;
       }
 

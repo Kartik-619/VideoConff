@@ -59,26 +59,19 @@ interface PeerJoinData {
   userId: string
 }
 
-interface SignalingMessage {
-  type: string
-  data?: {
-    message: string
-    name: string
-    userId: string
-    timestamp: string
-  }
-  participants?: PeerJoinData[]
-  peerId?: string
-  hostId?: string | null
-  peers?: PeerJoinData[]
-  senderPeerId: string
-  sdp?: RTCSessionDescriptionInit
-  candidate?: RTCIceCandidateInit
-  message?: string
-  roomId?: string
-  name?: string
-  userId?: string
-}
+type SignalingMessage =
+  | { type: 'lobbyUpdate'; participants?: { id: string; name: string }[] }
+  | { type: 'joined'; peerId: string; hostId: string | null }
+  | { type: 'existingPeers'; peers: PeerJoinData[] }
+  | { type: 'peerJoined'; senderPeerId: string; name: string; userId: string }
+  | { type: 'peerLeft'; senderPeerId: string }
+  | { type: 'chatMessage'; data?: { message: string; name: string; userId: string; timestamp: string } }
+  | { type: 'meetingEnded' }
+  | { type: 'offer'; sdp: RTCSessionDescriptionInit; senderPeerId: string; targetPeerId: string }
+  | { type: 'answer'; sdp: RTCSessionDescriptionInit; senderPeerId: string; targetPeerId: string }
+  | { type: 'ice-candidate'; candidate: RTCIceCandidateInit; senderPeerId: string; targetPeerId: string }
+  | { type: 'request-offer'; targetPeerId: string; senderPeerId: string }
+  | { type: 'join'; roomId: string; name: string; userId: string; senderPeerId: string }
 
 const MAX_MESSAGES = 500
 const MAX_RECONNECT_ATTEMPTS = 10
@@ -95,6 +88,7 @@ export default function MeetingRoom() {
   const reconnectAttempts = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localThumbRef = useRef<HTMLVideoElement>(null)
   const socketIdRef = useRef<string | null>(null)
@@ -230,20 +224,39 @@ export default function MeetingRoom() {
     const polite = (socketIdRef.current || "") < peerId
     console.log(`[WebRTC] Creating PC for ${peerId}, polite: ${polite}`)
 
+    const turnServers = (process.env.NEXT_PUBLIC_TURN_SERVERS || '').split(',').filter(Boolean).map(url => {
+      const [urls, username, credential] = url.split('|')
+      return { urls, username, credential }
+    })
+
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
+        { urls: 'stun:stun4.l.google.com:19302' },
+        ...turnServers
       ],
-      iceCandidatePoolSize: 10
+      iceCandidatePoolSize: 10,
+      iceTransportPolicy: 'all'
     })
 
     peerConnectionsRef.current.set(peerId, pc)
 
     signalingStateRef.current.set(peerId, { makingOffer: false, ignoreOffer: false })
+
+    // Add tracks FIRST before setting up negotiation handler
+    // This ensures tracks are present when onnegotiationneeded fires
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        try {
+          pc.addTrack(track, localStreamRef.current!)
+        } catch (e) {
+          console.warn("Track already added:", e)
+        }
+      })
+    }
 
     pc.ontrack = (event) => {
       console.log(`[WebRTC] Received track from ${peerId}:`, event.track.kind)
@@ -276,7 +289,7 @@ export default function MeetingRoom() {
           return updated
         })
 
-        if (localStream && !isCleaningUpRef.current) {
+        if (localStreamRef.current && !isCleaningUpRef.current) {
           setTimeout(() => {
             reconnectingPcsRef.current.delete(peerId)
             const existing = peerConnectionsRef.current.get(peerId)
@@ -299,31 +312,31 @@ export default function MeetingRoom() {
 
     pc.oniceconnectionstatechange = () => {
       console.log(`[WebRTC] ICE state for ${peerId}:`, pc.iceConnectionState)
+      // Handle ICE connection failures
+      if (pc.iceConnectionState === 'failed') {
+        console.log(`[WebRTC] ICE failed for ${peerId}, attempting restart`)
+        pc.restartIce()
+      }
     }
 
     // Perfect Negotiation Pattern: onnegotiationneeded
+    // Uses trickle ICE: send offer immediately, then trickle ICE candidates
     pc.onnegotiationneeded = async () => {
       try {
         const sigState = getSignalingState(peerId)
         sigState.makingOffer = true
-        await pc.setLocalDescription(await pc.createOffer())
+
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
         sigState.makingOffer = false
+
+        // Send offer immediately (trickle ICE - candidates will be sent separately)
         await sendLocalDescription(peerId)
       } catch (err) {
         console.error(`[WebRTC] Error in negotiationneeded for ${peerId}:`, err)
         const sigState = getSignalingState(peerId)
         sigState.makingOffer = false
       }
-    }
-
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        try {
-          pc.addTrack(track, localStream)
-        } catch (e) {
-          console.warn("Track already added:", e)
-        }
-      })
     }
 
     const bufferedCandidates = pendingIceCandidatesRef.current.get(peerId)
@@ -665,6 +678,7 @@ export default function MeetingRoom() {
               })
 
               console.log("[Media] Got local stream with tracks:", stream.getTracks().map(t => `${t.kind}:${t.label}`))
+              localStreamRef.current = stream
               setLocalStream(stream)
               localStreamReadyRef.current = true
 
@@ -833,6 +847,7 @@ export default function MeetingRoom() {
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop())
       setLocalStream(null)
+      localStreamRef.current = null
     }
     localStreamReadyRef.current = false
     if (screenTrackRef.current) {
