@@ -372,7 +372,7 @@ async function startServer() {
               if (otherId === peerId) return;
               safeSend(otherPeer.socket, {
                 type: "peerJoined",
-                peerId: peerId,
+                senderPeerId: peerId,
                 name: user.name,
                 userId: userId,
               });
