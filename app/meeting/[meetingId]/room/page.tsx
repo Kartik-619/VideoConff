@@ -243,21 +243,9 @@ export default function MeetingRoom() {
     })
 
     peerConnectionsRef.current.set(peerId, pc)
-
     signalingStateRef.current.set(peerId, { makingOffer: false, ignoreOffer: false })
 
-    // Add tracks FIRST before setting up negotiation handler
-    // This ensures tracks are present when onnegotiationneeded fires
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        try {
-          pc.addTrack(track, localStreamRef.current!)
-        } catch (e) {
-          console.warn("Track already added:", e)
-        }
-      })
-    }
-
+    // Set up ALL handlers FIRST before adding tracks
     pc.ontrack = (event) => {
       console.log(`[WebRTC] Received track from ${peerId}:`, event.track.kind)
       if (event.streams && event.streams[0]) {
@@ -312,7 +300,6 @@ export default function MeetingRoom() {
 
     pc.oniceconnectionstatechange = () => {
       console.log(`[WebRTC] ICE state for ${peerId}:`, pc.iceConnectionState)
-      // Handle ICE connection failures
       if (pc.iceConnectionState === 'failed') {
         console.log(`[WebRTC] ICE failed for ${peerId}, attempting restart`)
         pc.restartIce()
@@ -320,23 +307,37 @@ export default function MeetingRoom() {
     }
 
     // Perfect Negotiation Pattern: onnegotiationneeded
-    // Uses trickle ICE: send offer immediately, then trickle ICE candidates
+    // Guard: skip if negotiation already started externally
     pc.onnegotiationneeded = async () => {
       try {
         const sigState = getSignalingState(peerId)
+        if (sigState.makingOffer) {
+          console.log(`[WebRTC] onnegotiationneeded skipped - already making offer for ${peerId}`)
+          return
+        }
         sigState.makingOffer = true
 
         const offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
         sigState.makingOffer = false
 
-        // Send offer immediately (trickle ICE - candidates will be sent separately)
         await sendLocalDescription(peerId)
       } catch (err) {
         console.error(`[WebRTC] Error in negotiationneeded for ${peerId}:`, err)
         const sigState = getSignalingState(peerId)
         sigState.makingOffer = false
       }
+    }
+
+    // Add tracks AFTER handlers are set so onnegotiationneeded fires properly
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        try {
+          pc.addTrack(track, localStreamRef.current!)
+        } catch (e) {
+          console.warn("Track already added:", e)
+        }
+      })
     }
 
     const bufferedCandidates = pendingIceCandidatesRef.current.get(peerId)
@@ -359,24 +360,24 @@ export default function MeetingRoom() {
     const pc = await createPeerConnection(peerId)
     if (!pc) return
 
-    // Tracks are already added in createPeerConnection which triggers
-    // onnegotiationneeded automatically. Only manually create offer
-    // if no tracks were added (video off scenario)
-    const hasTracks = pc.getSenders().some(s => s.track)
-    if (!hasTracks) {
-      const polite = (socketIdRef.current || "") < peerId
-      if (polite) {
-        try {
-          const sigState = getSignalingState(peerId)
-          sigState.makingOffer = true
-          await pc.setLocalDescription(await pc.createOffer())
-          sigState.makingOffer = false
-          await sendLocalDescription(peerId)
-        } catch (err) {
-          console.error(`[WebRTC] Error creating initial offer for ${peerId}:`, err)
-          const sigState = getSignalingState(peerId)
-          sigState.makingOffer = false
-        }
+    // Only the polite peer initiates the offer to avoid glare
+    const polite = (socketIdRef.current || "") < peerId
+    if (polite) {
+      const sigState = getSignalingState(peerId)
+      // Skip if negotiation already in progress (e.g., onnegotiationneeded fired first)
+      if (sigState.makingOffer || pc.signalingState === 'have-local-offer') {
+        console.log(`[WebRTC] Skipping manual offer for ${peerId} - already negotiating`)
+        return
+      }
+      try {
+        sigState.makingOffer = true
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        sigState.makingOffer = false
+        await sendLocalDescription(peerId)
+      } catch (err) {
+        console.error(`[WebRTC] Error creating initial offer for ${peerId}:`, err)
+        sigState.makingOffer = false
       }
     }
   }
