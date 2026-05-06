@@ -86,8 +86,9 @@ export default function MeetingLobby() {
             return;
           }
 
+          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
           const ws = new WebSocket(
-            `${process.env.NEXT_PUBLIC_BACKEND_URL?.replace('https://', 'wss://').replace('http://', 'ws://') || 'ws://localhost:8080'}?token=${token}`
+            `${backendUrl.replace(/^https/, 'wss').replace(/^http/, 'ws')}?token=${token}`
           );
           wsRef.current = ws;
           joinSentRef.current = false;

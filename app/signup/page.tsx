@@ -66,8 +66,13 @@ export default function SignupPage() {
       setLoading(true);
       await axios.post('/api/signup', form);
       router.push('/login');
-    } catch (err: any) {
-      setError(err.response?.data || 'Signup failed');
+    } catch (err) {
+      if (err && typeof err === 'object' && 'response' in err) {
+        const axiosError = err as { response?: { data?: string } };
+        setError(axiosError.response?.data || 'Signup failed');
+      } else {
+        setError('Signup failed');
+      }
     } finally {
       setLoading(false);
     }

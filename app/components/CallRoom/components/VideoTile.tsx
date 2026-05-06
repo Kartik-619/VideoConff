@@ -23,7 +23,7 @@ export default function VideoTile({
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (ref.current) {
+    if (ref.current && stream) {
         ref.current.srcObject = stream;
 
         ref.current.play().catch(() => {
