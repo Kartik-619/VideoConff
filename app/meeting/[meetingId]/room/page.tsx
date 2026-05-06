@@ -214,8 +214,12 @@ export default function MeetingRoom() {
     }
   }, [])
 
+  const joinInitRef = useRef(false)
+
   useEffect(() => {
     if (!meetingId || !session?.user?.id) return
+    if (joinInitRef.current) return
+    joinInitRef.current = true
 
     connectAndRequestMedia()
 
@@ -223,7 +227,7 @@ export default function MeetingRoom() {
       isCleaningUpRef.current = true
       ws.disconnect()
     }
-  }, [])
+  }, [meetingId, session?.user?.id])
 
   const handleSendMessage = useCallback((msg: string) => {
     ws.sendMessage("chatMessage", { message: msg })
