@@ -455,6 +455,23 @@ async function startServer() {
             });
           }
         }
+
+        // Relay stream-unavailable to target peer
+        if (data.type === "stream-unavailable") {
+          if (!roomId || !peerId) return;
+          const room = rooms.get(roomId);
+          if (!room) return;
+          if (!room.peers.has(peerId)) return;
+          if (!data.targetPeerId) return;
+
+          const targetPeer = room.peers.get(data.targetPeerId);
+          if (targetPeer) {
+            safeSend(targetPeer.socket, {
+              type: "stream-unavailable",
+              senderPeerId: peerId,
+            });
+          }
+        }
       } catch (err) {
         console.error("WS Message Error:", err);
       }

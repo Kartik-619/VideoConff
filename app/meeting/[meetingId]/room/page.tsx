@@ -72,6 +72,7 @@ type SignalingMessage =
   | { type: 'ice-candidate'; candidate: RTCIceCandidateInit; senderPeerId: string; targetPeerId: string }
   | { type: 'request-offer'; targetPeerId: string; senderPeerId: string }
   | { type: 'join'; roomId: string; name: string; userId: string; senderPeerId: string }
+  | { type: 'stream-unavailable'; senderPeerId: string; targetPeerId: string }
 
 const MAX_MESSAGES = 500
 const MAX_RECONNECT_ATTEMPTS = 10
@@ -115,6 +116,7 @@ export default function MeetingRoom() {
   const pendingOffersRef = useRef<PendingOffer[]>([])
   const pendingIceCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const localStreamReadyRef = useRef(false)
+  const streamFailedRef = useRef(false)
 
   const allStreams = useMemo(() => {
     const result: StreamInfo[] = []
@@ -362,28 +364,36 @@ export default function MeetingRoom() {
 
     // Only the polite peer initiates the offer to avoid glare
     const polite = (socketIdRef.current || "") < peerId
-    if (polite) {
+    if (!polite) return
+
+    try {
       const sigState = getSignalingState(peerId)
-      // Skip if negotiation already in progress (e.g., onnegotiationneeded fired first)
-      if (sigState.makingOffer || pc.signalingState === 'have-local-offer') {
-        console.log(`[WebRTC] Skipping manual offer for ${peerId} - already negotiating`)
-        return
-      }
-      try {
-        sigState.makingOffer = true
-        const offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
-        sigState.makingOffer = false
-        await sendLocalDescription(peerId)
-      } catch (err) {
-        console.error(`[WebRTC] Error creating initial offer for ${peerId}:`, err)
-        sigState.makingOffer = false
-      }
+      sigState.makingOffer = true
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      sigState.makingOffer = false
+      await sendLocalDescription(peerId)
+    } catch (err) {
+      console.error(`[WebRTC] Error creating initial offer for ${peerId}:`, err)
+      const sigState = getSignalingState(peerId)
+      sigState.makingOffer = false
     }
   }
 
   async function handleOffer(data: { senderPeerId: string; sdp: RTCSessionDescriptionInit }) {
     const peerId = data.senderPeerId
+
+    if (streamFailedRef.current) {
+      console.log(`[WebRTC] Rejecting offer from ${peerId} - stream permanently unavailable`)
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: "stream-unavailable",
+          senderPeerId: socketIdRef.current,
+          targetPeerId: peerId,
+        }))
+      }
+      return
+    }
 
     if (!localStreamReadyRef.current) {
       console.log("[offer] Local stream not ready, queueing offer for later")
@@ -689,13 +699,34 @@ export default function MeetingRoom() {
               await processPendingOffers()
             } catch (err) {
               console.error("Error getting user media:", err)
-              toast.error("Failed to access camera/microphone")
+              streamFailedRef.current = true
+
+              const isNotAllowed = (err as DOMException)?.name === 'NotAllowedError'
+
+              if (isNotAllowed) {
+                toast.error("Camera/mic permission denied. Please allow access in your browser settings and rejoin.")
+              } else {
+                toast.error("Failed to access camera/microphone")
+              }
+
+              for (const pending of pendingOffersRef.current) {
+                console.log(`[WebRTC] Rejecting pending offer from ${pending.peerId} - no local stream`)
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({
+                    type: "stream-unavailable",
+                    senderPeerId: socketIdRef.current,
+                    targetPeerId: pending.peerId,
+                  }))
+                }
+              }
+              pendingOffersRef.current = []
+              pendingPeersRef.current = []
             }
 
             ws.send(JSON.stringify({ type: "getParticipants" }))
           }
 
-          if (data.type === "existingPeers") {
+            if (data.type === "existingPeers") {
             console.log("[existingPeers] Received:", data.peers)
             const peers = data.peers ?? []
             for (const peer of peers) {
@@ -708,7 +739,16 @@ export default function MeetingRoom() {
                 return updated
               })
 
-              if (localStreamReadyRef.current) {
+              if (streamFailedRef.current) {
+                console.log(`[WebRTC] Skipping existing peer ${peer.peerId} - stream unavailable`)
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(JSON.stringify({
+                    type: "stream-unavailable",
+                    senderPeerId: socketIdRef.current,
+                    targetPeerId: peer.peerId,
+                  }))
+                }
+              } else if (localStreamReadyRef.current) {
                 console.log(`[WebRTC] Setting up connection for existing peer: ${peer.peerId}`)
                 await setupPeerConnection(peer.peerId)
               } else {
@@ -732,7 +772,16 @@ export default function MeetingRoom() {
               return updated
             })
 
-            if (localStreamReadyRef.current) {
+            if (streamFailedRef.current) {
+              console.log(`[WebRTC] Rejecting new peer ${peerId} - stream unavailable`)
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({
+                  type: "stream-unavailable",
+                  senderPeerId: socketIdRef.current,
+                  targetPeerId: peerId,
+                }))
+              }
+            } else if (localStreamReadyRef.current) {
               console.log(`[WebRTC] Setting up connection for new peer: ${peerId}`)
               await setupPeerConnection(peerId)
             } else {
@@ -774,6 +823,12 @@ export default function MeetingRoom() {
             if (data.candidate) {
               await handleIceCandidate({ senderPeerId: data.senderPeerId, candidate: data.candidate })
             }
+          }
+
+          if (data.type === "stream-unavailable") {
+            console.log(`[WebRTC] Peer ${data.senderPeerId} has no stream available`)
+            toast.error(`${data.senderPeerId.slice(0, 8)}... cannot share media - camera/mic permission denied`)
+            closePeerConnection(data.senderPeerId)
           }
         } catch (err) {
           console.error("WS message parse error:", err)
