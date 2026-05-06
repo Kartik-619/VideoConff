@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { redis } from "@/lib/redis";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import jwt from "jsonwebtoken";
 
 export async function POST(req: Request) {
   try {
@@ -87,12 +88,18 @@ export async function POST(req: Request) {
     // =========================
 
     try {
+      const token = jwt.sign(
+        { id: userId },
+        process.env.NEXTAUTH_SECRET!,
+        { expiresIn: "5m" }
+      );
+
       await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/endMeeting`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ meetingId }),
+        body: JSON.stringify({ meetingId, token }),
       });
     } catch (err) {
       console.error("WS end notify failed:", err);

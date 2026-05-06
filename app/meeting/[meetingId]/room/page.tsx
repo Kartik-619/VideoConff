@@ -41,6 +41,40 @@ interface SignalingState {
   ignoreOffer: boolean
 }
 
+interface ChatMessage {
+  text: string
+  name: string
+  userId: string
+  timestamp: string
+}
+
+interface PeerJoinData {
+  peerId: string
+  name: string
+  userId: string
+}
+
+interface SignalingMessage {
+  type: string
+  data?: {
+    message: string
+    name: string
+    userId: string
+    timestamp: string
+  }
+  participants?: PeerJoinData[]
+  peerId?: string
+  hostId?: string | null
+  peers?: PeerJoinData[]
+  senderPeerId: string
+  sdp?: RTCSessionDescriptionInit
+  candidate?: RTCIceCandidateInit
+  message?: string
+  roomId?: string
+  name?: string
+  userId?: string
+}
+
 const MAX_MESSAGES = 500
 const MAX_RECONNECT_ATTEMPTS = 10
 const RECONNECT_BASE_DELAY = 1000
@@ -73,7 +107,7 @@ export default function MeetingRoom() {
   const [screenSharing, setScreenSharing] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState("Connecting...")
   const [participants, setParticipants] = useState(0)
-  const [messages, setMessages] = useState<any[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const joinSentRef = useRef(false)
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const signalingStateRef = useRef<Map<string, SignalingState>>(new Map())
@@ -100,7 +134,7 @@ export default function MeetingRoom() {
       if (peerId === socketIdRef.current) return
       const participant = remoteParticipants.get(peerId)
       const videoTracks = stream.getVideoTracks()
-      const hasVideo = videoTracks.length > 0 && videoTracks[0].enabled
+      const hasVideo = videoTracks.length > 0 && videoTracks[0]!.enabled
       result.push({
         id: peerId,
         stream,
@@ -306,18 +340,24 @@ export default function MeetingRoom() {
     const pc = await createPeerConnection(peerId)
     if (!pc) return
 
-    const polite = (socketIdRef.current || "") < peerId
-    if (polite) {
-      try {
-        const sigState = getSignalingState(peerId)
-        sigState.makingOffer = true
-        await pc.setLocalDescription(await pc.createOffer())
-        sigState.makingOffer = false
-        await sendLocalDescription(peerId)
-      } catch (err) {
-        console.error(`[WebRTC] Error creating initial offer for ${peerId}:`, err)
-        const sigState = getSignalingState(peerId)
-        sigState.makingOffer = false
+    // Tracks are already added in createPeerConnection which triggers
+    // onnegotiationneeded automatically. Only manually create offer
+    // if no tracks were added (video off scenario)
+    const hasTracks = pc.getSenders().some(s => s.track)
+    if (!hasTracks) {
+      const polite = (socketIdRef.current || "") < peerId
+      if (polite) {
+        try {
+          const sigState = getSignalingState(peerId)
+          sigState.makingOffer = true
+          await pc.setLocalDescription(await pc.createOffer())
+          sigState.makingOffer = false
+          await sendLocalDescription(peerId)
+        } catch (err) {
+          console.error(`[WebRTC] Error creating initial offer for ${peerId}:`, err)
+          const sigState = getSignalingState(peerId)
+          sigState.makingOffer = false
+        }
       }
     }
   }
@@ -343,7 +383,7 @@ export default function MeetingRoom() {
       return
     }
 
-    let pc = peerConnectionsRef.current.get(peerId)
+    let pc: RTCPeerConnection | null = peerConnectionsRef.current.get(peerId) ?? null
     if (!pc) {
       pc = await createPeerConnection(peerId)
       if (!pc) return
@@ -506,7 +546,13 @@ export default function MeetingRoom() {
         return
       }
 
-      const { token } = await res.json()
+      const json = await res.json() as { token?: string }
+      if (!json.token) {
+        console.error("Failed to get WS token")
+        connectingRef.current = false
+        return
+      }
+      const token = json.token
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080'
       const wsUrl = `${backendUrl.replace(/^https/, 'wss').replace(/^http/, 'ws')}?token=${token}`
 
@@ -529,19 +575,21 @@ export default function MeetingRoom() {
 
       ws.onmessage = async (e) => {
         try {
-          const data = JSON.parse(e.data)
+          const data = JSON.parse(e.data) as SignalingMessage
 
           if (data.type === "lobbyUpdate") {
-            setParticipants(data.participants.length)
+            setParticipants(data.participants?.length ?? 0)
           }
 
           if (data.type === "chatMessage") {
+            const msgData = data.data
+            if (!msgData) return
             setMessages(prev => {
-              const next = [...prev, {
-                text: data.data.message,
-                name: data.data.name,
-                userId: data.data.userId,
-                timestamp: data.data.timestamp,
+              const next: ChatMessage[] = [...prev, {
+                text: msgData.message,
+                name: msgData.name,
+                userId: msgData.userId,
+                timestamp: msgData.timestamp,
               }]
               if (next.length > MAX_MESSAGES) {
                 return next.slice(next.length - MAX_MESSAGES)
@@ -558,9 +606,11 @@ export default function MeetingRoom() {
           }
 
           if (data.type === "joined") {
-            console.log("[joined] Socket ID:", data.peerId, "Host:", data.hostId)
-            socketIdRef.current = data.peerId
-            setHostId(data.hostId)
+            const peerId = data.peerId ?? ""
+            const hostId = data.hostId ?? null
+            console.log("[joined] Socket ID:", peerId, "Host:", hostId)
+            socketIdRef.current = peerId
+            setHostId(hostId)
             setRemoteStreams(new Map())
             setRemoteParticipants(new Map())
             peerConnectionsRef.current.forEach(pc => {
@@ -612,11 +662,12 @@ export default function MeetingRoom() {
 
           if (data.type === "existingPeers") {
             console.log("[existingPeers] Received:", data.peers)
-            for (const peer of data.peers) {
+            const peers = data.peers ?? []
+            for (const peer of peers) {
               setRemoteParticipants(prev => {
                 const updated = new Map(prev)
                 updated.set(peer.peerId, {
-                  name: peer.name || `User ${peer.peerId.slice(0, 6)}`,
+                  name: peer.name || `User ${(peer.peerId || "").slice(0, 6)}`,
                   userId: peer.userId
                 })
                 return updated
@@ -633,51 +684,61 @@ export default function MeetingRoom() {
           }
 
           if (data.type === "peerJoined") {
-            console.log("[peerJoined] New peer:", data.peerId, data.name)
+            const peerId = data.senderPeerId ?? ""
+            const peerName = data.name ?? ""
+            const peerUserId = data.userId ?? ""
+            console.log("[peerJoined] New peer:", peerId, peerName)
             setRemoteParticipants(prev => {
               const updated = new Map(prev)
-              updated.set(data.peerId, {
-                name: data.name || `User ${data.peerId.slice(0, 6)}`,
-                userId: data.userId
+              updated.set(peerId, {
+                name: peerName || `User ${peerId.slice(0, 6)}`,
+                userId: peerUserId
               })
               return updated
             })
 
             if (localStreamReadyRef.current) {
-              console.log(`[WebRTC] Setting up connection for new peer: ${data.peerId}`)
-              await setupPeerConnection(data.peerId)
+              console.log(`[WebRTC] Setting up connection for new peer: ${peerId}`)
+              await setupPeerConnection(peerId)
             } else {
-              console.log(`[WebRTC] Queueing new peer: ${data.peerId}`)
+              console.log(`[WebRTC] Queueing new peer: ${peerId}`)
               pendingPeersRef.current.push({
-                peerId: data.peerId,
-                name: data.name,
-                userId: data.userId
+                peerId,
+                name: peerName,
+                userId: peerUserId
               })
             }
           }
 
           if (data.type === "peerLeft") {
-            console.log("[peerLeft] Peer left:", data.peerId)
-            closePeerConnection(data.peerId)
+            const peerId = data.senderPeerId ?? ""
+            console.log("[peerLeft] Peer left:", peerId)
+            closePeerConnection(peerId)
             setRemoteParticipants(prev => {
               const updated = new Map(prev)
-              updated.delete(data.peerId)
+              updated.delete(peerId)
               return updated
             })
           }
 
           if (data.type === "offer") {
             console.log("[offer] Received from:", data.senderPeerId)
-            await handleOffer(data)
+            if (data.sdp) {
+              await handleOffer({ senderPeerId: data.senderPeerId, sdp: data.sdp })
+            }
           }
 
           if (data.type === "answer") {
             console.log("[answer] Received from:", data.senderPeerId)
-            await handleAnswer(data)
+            if (data.sdp) {
+              await handleAnswer({ senderPeerId: data.senderPeerId, sdp: data.sdp })
+            }
           }
 
           if (data.type === "ice-candidate") {
-            await handleIceCandidate(data)
+            if (data.candidate) {
+              await handleIceCandidate({ senderPeerId: data.senderPeerId, candidate: data.candidate })
+            }
           }
         } catch (err) {
           console.error("WS message parse error:", err)
@@ -790,7 +851,7 @@ export default function MeetingRoom() {
 
       <LayoutCall count={allStreams.length}>
         {allStreams.map(({ id, stream, isLocal, userName, userImage, isVideoOff }) => {
-          const hasVideo = stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0].enabled
+          const hasVideo = stream.getVideoTracks().length > 0 && stream.getVideoTracks()[0]!.enabled
           return (
             <VideoTile
               key={id}

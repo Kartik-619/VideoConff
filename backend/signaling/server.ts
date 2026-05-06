@@ -158,51 +158,90 @@ async function broadcastLobby(roomId: string) {
   }
 }
 
-function broadcastMeetingEnded(roomId: string) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-
-  room.peers.forEach((peer: Peer) => {
-    safeSend(peer.socket, { type: "meetingEnded" });
-  });
-}
-
 /* ---------------- HTTP ---------------- */
 
 app.post("/leave", async (req, res) => {
-  const { meetingId, userId } = req.body;
+  const { meetingId, userId, token } = req.body;
   if (!meetingId || !userId) {
     return res.status(400).json({ error: "meetingId and userId required" });
   }
 
+  if (token) {
+    try {
+      jwt.verify(token, process.env.NEXTAUTH_SECRET!);
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+  }
+
   const room = rooms.get(meetingId);
   if (room) {
-    for (const [peerId, peer] of room.peers.entries()) {
+    const peersToRemove: string[] = [];
+    for (const [existingPeerId, peer] of room.peers.entries()) {
       if (peer.userId === userId) {
-        (peer.socket as any).__replaced = true;
-        peer.socket.close();
-        room.peers.delete(peerId);
-        await redis.srem(`meeting:${meetingId}:participants`, userId);
-        room.peers.forEach((otherPeer) => {
-          safeSend(otherPeer.socket, {
-            type: "peerLeft",
-            peerId: peerId,
-          });
-        });
-        await broadcastLobby(meetingId);
-        if (room.peers.size === 0) {
-          scheduleRoomDeletion(meetingId);
-        }
-        break;
+        peersToRemove.push(existingPeerId);
       }
+    }
+
+    for (const existingPeerId of peersToRemove) {
+      const peer = room.peers.get(existingPeerId);
+      if (!peer) continue;
+      (peer.socket as any).__replaced = true;
+      peer.socket.close();
+      room.peers.delete(existingPeerId);
+    }
+
+    if (peersToRemove.length > 0) {
+      await redis.srem(`meeting:${meetingId}:participants`, userId);
+      room.peers.forEach((otherPeer) => {
+        safeSend(otherPeer.socket, {
+          type: "peerLeft",
+          senderPeerId: userId,
+        });
+      });
+      await broadcastLobby(meetingId);
+    }
+
+    if (room.peers.size === 0) {
+      scheduleRoomDeletion(meetingId);
     }
   }
 
   res.json({ ok: true });
 });
 
-app.post("/endMeeting", (req, res) => {
-  broadcastMeetingEnded(req.body.meetingId);
+app.post("/endMeeting", async (req, res) => {
+  const { meetingId, token } = req.body;
+  if (!meetingId) {
+    return res.status(400).json({ error: "meetingId required" });
+  }
+
+  if (token) {
+    try {
+      jwt.verify(token, process.env.NEXTAUTH_SECRET!);
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+  }
+
+  const room = rooms.get(meetingId);
+  if (room) {
+    room.peers.forEach((peer) => {
+      safeSend(peer.socket, { type: "meetingEnded" });
+      (peer.socket as any).__replaced = true;
+      peer.socket.close();
+    });
+    room.peers.clear();
+    rooms.delete(meetingId);
+    cancelDeletionTimer(meetingId);
+
+    try {
+      await redis.del(`meeting:${meetingId}:participants`);
+    } catch (err) {
+      console.error("Redis cleanup error for endMeeting:", err);
+    }
+  }
+
   res.json({ ok: true });
 });
 
@@ -223,6 +262,11 @@ app.post("/startMeeting", async (req, res) => {
 /* ---------------- SERVER ---------------- */
 
 async function startServer() {
+  if (!process.env.NEXTAUTH_SECRET) {
+    console.error("FATAL: NEXTAUTH_SECRET is not set");
+    process.exit(1);
+  }
+
   const PORT = process.env.PORT || 8080;
   const server = app.listen(PORT, () => console.log(`WS Server running on ${PORT}`));
 
@@ -234,8 +278,15 @@ async function startServer() {
     let userId: string | null = null;
 
     ws.on("message", async (message) => {
+      const raw = message.toString();
+
+      if (raw.length > 100 * 1024) {
+        console.error("[ws] Message too large, rejecting");
+        return;
+      }
+
       try {
-        const data = JSON.parse(message.toString());
+        const data = JSON.parse(raw);
 
         if (data.type === "getParticipants") {
           if (!roomId) return;
@@ -352,8 +403,11 @@ async function startServer() {
         
         // Relay offer to target peer
         if (data.type === "offer") {
-          const room = rooms.get(roomId!);
+          if (!roomId || !peerId) return;
+          const room = rooms.get(roomId);
           if (!room) return;
+          if (!room.peers.has(peerId)) return;
+          if (!data.targetPeerId || !data.sdp) return;
 
           const targetPeer = room.peers.get(data.targetPeerId);
           if (targetPeer) {
@@ -361,15 +415,18 @@ async function startServer() {
               type: "offer",
               sdp: data.sdp,
               senderPeerId: peerId,
-              senderName: room.peers.get(peerId!)?.name,
+              senderName: room.peers.get(peerId)?.name,
             });
           }
         }
 
         // Relay answer to target peer
         if (data.type === "answer") {
-          const room = rooms.get(roomId!);
+          if (!roomId || !peerId) return;
+          const room = rooms.get(roomId);
           if (!room) return;
+          if (!room.peers.has(peerId)) return;
+          if (!data.targetPeerId || !data.sdp) return;
 
           const targetPeer = room.peers.get(data.targetPeerId);
           if (targetPeer) {
@@ -383,8 +440,11 @@ async function startServer() {
 
         // Relay ICE candidate to target peer
         if (data.type === "ice-candidate") {
-          const room = rooms.get(roomId!);
+          if (!roomId || !peerId) return;
+          const room = rooms.get(roomId);
           if (!room) return;
+          if (!room.peers.has(peerId)) return;
+          if (!data.targetPeerId || !data.candidate) return;
 
           const targetPeer = room.peers.get(data.targetPeerId);
           if (targetPeer) {
@@ -422,7 +482,7 @@ async function startServer() {
       room.peers.forEach((otherPeer) => {
         safeSend(otherPeer.socket, {
           type: "peerLeft",
-          peerId: peerId,
+          senderPeerId: peerId,
         });
       });
 
