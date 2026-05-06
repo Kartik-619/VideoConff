@@ -36,6 +36,11 @@ interface PendingPeer {
   userId: string
 }
 
+interface PendingOffer {
+  peerId: string
+  sdp: RTCSessionDescriptionInit
+}
+
 interface SignalingState {
   makingOffer: boolean
   ignoreOffer: boolean
@@ -113,6 +118,7 @@ export default function MeetingRoom() {
   const signalingStateRef = useRef<Map<string, SignalingState>>(new Map())
   const reconnectingPcsRef = useRef<Set<string>>(new Set())
   const pendingPeersRef = useRef<PendingPeer[]>([])
+  const pendingOffersRef = useRef<PendingOffer[]>([])
   const pendingIceCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const localStreamReadyRef = useRef(false)
 
@@ -366,13 +372,12 @@ export default function MeetingRoom() {
     const peerId = data.senderPeerId
 
     if (!localStreamReadyRef.current) {
-      console.log("[offer] Local stream not ready, queueing peer for later")
-      const existingPeer = pendingPeersRef.current.find(p => p.peerId === peerId)
-      if (!existingPeer) {
-        pendingPeersRef.current.push({
+      console.log("[offer] Local stream not ready, queueing offer for later")
+      const existingOffer = pendingOffersRef.current.find(p => p.peerId === peerId)
+      if (!existingOffer) {
+        pendingOffersRef.current.push({
           peerId,
-          name: "",
-          userId: ""
+          sdp: data.sdp
         })
       }
       return
@@ -415,6 +420,24 @@ export default function MeetingRoom() {
       await sendLocalDescription(peerId)
     } catch (err) {
       console.error(`[WebRTC] Error handling offer from ${peerId}:`, err)
+    }
+  }
+
+  async function processPendingOffers() {
+    const offers = [...pendingOffersRef.current]
+    pendingOffersRef.current = []
+
+    for (const pending of offers) {
+      console.log(`[WebRTC] Processing pending offer from ${pending.peerId}`)
+      await handleOffer({ senderPeerId: pending.peerId, sdp: pending.sdp })
+    }
+
+    const peers = [...pendingPeersRef.current]
+    pendingPeersRef.current = []
+
+    for (const peer of peers) {
+      console.log(`[WebRTC] Processing pending peer: ${peer.peerId}`)
+      await setupPeerConnection(peer.peerId)
     }
   }
 
@@ -480,14 +503,14 @@ export default function MeetingRoom() {
         screenTrackRef.current?.stop()
         setScreenSharing(false)
         const cameraTrack = localStream?.getVideoTracks()[0]
-        if (cameraTrack) {
-          peerConnectionsRef.current.forEach((pc) => {
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-            if (sender) {
-              sender.replaceTrack(cameraTrack)
-            }
-          })
-        }
+        peerConnectionsRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+          if (sender) {
+            sender.replaceTrack(cameraTrack || null)
+          } else if (cameraTrack) {
+            pc.addTrack(cameraTrack, localStream!)
+          }
+        })
         return
       }
 
@@ -503,6 +526,8 @@ export default function MeetingRoom() {
         const sender = pc.getSenders().find(s => s.track?.kind === 'video')
         if (sender) {
           sender.replaceTrack(track)
+        } else {
+          pc.addTrack(track, stream)
         }
       })
 
@@ -510,14 +535,14 @@ export default function MeetingRoom() {
         screenTrackRef.current = null
         setScreenSharing(false)
         const cameraTrack = localStream?.getVideoTracks()[0]
-        if (cameraTrack) {
-          peerConnectionsRef.current.forEach((pc) => {
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-            if (sender) {
-              sender.replaceTrack(cameraTrack)
-            }
-          })
-        }
+        peerConnectionsRef.current.forEach((pc) => {
+          const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+          if (sender) {
+            sender.replaceTrack(cameraTrack || null)
+          } else if (cameraTrack) {
+            pc.addTrack(cameraTrack, localStream!)
+          }
+        })
       }
     } catch (err) {
       console.error("Screen share error:", err)
@@ -625,6 +650,7 @@ export default function MeetingRoom() {
             signalingStateRef.current.clear()
             reconnectingPcsRef.current.clear()
             pendingPeersRef.current = []
+            pendingOffersRef.current = []
             pendingIceCandidatesRef.current.clear()
             reconnectAttempts.current = 0
             if (reconnectTimerRef.current) {
@@ -645,13 +671,7 @@ export default function MeetingRoom() {
               if (localVideoRef.current) localVideoRef.current.srcObject = stream
               if (localThumbRef.current) localThumbRef.current.srcObject = stream
 
-              const peersToConnect = [...pendingPeersRef.current]
-              pendingPeersRef.current = []
-
-              for (const peer of peersToConnect) {
-                console.log(`[WebRTC] Processing pending peer: ${peer.peerId}`)
-                await setupPeerConnection(peer.peerId)
-              }
+              await processPendingOffers()
             } catch (err) {
               console.error("Error getting user media:", err)
               toast.error("Failed to access camera/microphone")
