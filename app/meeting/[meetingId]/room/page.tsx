@@ -49,7 +49,6 @@ export default function MeetingRoom() {
     socketIdRef,
     onAppendRemoteStream: useCallback((peerId: string, stream: MediaStream) => {
       setRemoteStreams(prev => {
-        if (prev.has(peerId)) return prev
         const updated = new Map(prev)
         updated.set(peerId, stream)
         return updated

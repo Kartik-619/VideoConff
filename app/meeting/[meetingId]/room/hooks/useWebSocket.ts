@@ -78,7 +78,8 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketReturn {
         joinSentRef.current = true
         config.onConnectionStatusChange("Connected")
         reconnectAttempts.current = 0
-        ws.send(JSON.stringify({ type: "join", roomId: config.meetingId }))
+        const roomId = (config.meetingId || "").trim()
+        ws.send(JSON.stringify({ type: "join", roomId }))
       }
 
       ws.onmessage = async (e) => {

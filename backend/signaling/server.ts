@@ -319,7 +319,9 @@ async function startServer() {
             const user = await prisma.user.findUnique({ where: { id: userId! } });
             if (!user) return ws.close();
 
-            roomId = data.roomId;
+            const requestedRoomId = typeof data.roomId === "string" ? data.roomId.trim() : "";
+            if (!requestedRoomId) return ws.close();
+            roomId = requestedRoomId;
             peerId = randomUUID();
 
             const room = await getOrCreateRoom(roomId!);

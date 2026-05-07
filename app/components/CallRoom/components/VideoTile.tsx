@@ -45,6 +45,8 @@ export default function VideoTile({
       track.addEventListener('mute', checkVideo);
       track.addEventListener('unmute', checkVideo);
     }
+    stream.addEventListener('addtrack', checkVideo);
+    stream.addEventListener('removetrack', checkVideo);
 
     return () => {
       for (const track of tracks) {
@@ -52,6 +54,8 @@ export default function VideoTile({
         track.removeEventListener('mute', checkVideo);
         track.removeEventListener('unmute', checkVideo);
       }
+      stream.removeEventListener('addtrack', checkVideo);
+      stream.removeEventListener('removetrack', checkVideo);
     };
   }, [stream]);
 
@@ -63,7 +67,7 @@ export default function VideoTile({
         ref={ref}
         autoPlay
         playsInline
-        muted
+        muted={isLocal}
         style={{
           display: displayVideo ? 'block' : 'none',
           width: '100%',

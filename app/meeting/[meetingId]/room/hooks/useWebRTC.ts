@@ -47,6 +47,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
   const pendingOffersRef = useRef<PendingOffer[]>([])
   const pendingIceCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
   const peerTimeoutsRef = useRef<Map<string, { checking?: NodeJS.Timeout, connecting?: NodeJS.Timeout }>>(new Map())
+  const inboundStreamsRef = useRef<Map<string, MediaStream>>(new Map())
 
   const getSignalingState = useCallback((peerId: string): SignalingState => {
     if (!signalingStateRef.current.has(peerId)) {
@@ -89,6 +90,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     signalingStateRef.current.delete(peerId)
     reconnectingPcsRef.current.delete(peerId)
     pendingIceCandidatesRef.current.delete(peerId)
+    inboundStreamsRef.current.delete(peerId)
     config.onClosePeerConnection(peerId)
   }, [])
 
@@ -119,13 +121,17 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
 
     pc.ontrack = (event) => {
       console.log(`Peer ${peerId} received remote track:`, event.track, event.streams)
-      if (event.streams && event.streams[0]) {
-        config.onAppendRemoteStream(peerId, event.streams[0])
-      } else if (event.track) {
-        const remoteStream = new MediaStream()
-        remoteStream.addTrack(event.track)
-        config.onAppendRemoteStream(peerId, remoteStream)
+      const streamFromEvent = event.streams?.[0]
+      const stream = streamFromEvent ?? inboundStreamsRef.current.get(peerId) ?? new MediaStream()
+      if (!inboundStreamsRef.current.has(peerId)) {
+        inboundStreamsRef.current.set(peerId, stream)
       }
+
+      if (!streamFromEvent && event.track && !stream.getTracks().some(track => track.id === event.track.id)) {
+        stream.addTrack(event.track)
+      }
+
+      config.onAppendRemoteStream(peerId, stream)
     }
 
     pc.onicecandidate = (event) => {
@@ -196,6 +202,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
               peerConnectionsRef.current.delete(peerId)
               signalingStateRef.current.delete(peerId)
               pendingIceCandidatesRef.current.delete(peerId)
+              inboundStreamsRef.current.delete(peerId)
               setupPeerConnection(peerId).catch(console.error)
             }
           }, 2000)
@@ -508,6 +515,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     pendingPeersRef.current = []
     pendingOffersRef.current = []
     pendingIceCandidatesRef.current.clear()
+    inboundStreamsRef.current.clear()
   }, [])
 
   const cleanupAll = useCallback(() => {
