@@ -45,10 +45,15 @@ export default function MeetingRoom() {
     wsRef,
     socketIdRef,
     onAppendRemoteStream: useCallback((peerId: string, stream: MediaStream) => {
+      console.log('[Page] Adding remote stream for peer:', peerId, 'stream id:', stream.id)
       setRemoteStreams(prev => {
-        if (prev.has(peerId)) return prev
+        if (prev.has(peerId)) {
+          console.log('[Page] Stream already exists for peer:', peerId, '- skipping')
+          return prev
+        }
         const updated = new Map(prev)
         updated.set(peerId, stream)
+        console.log('[Page] Remote streams count now:', updated.size)
         return updated
       })
     }, []),
@@ -75,6 +80,7 @@ export default function MeetingRoom() {
       webrtc.resetAll()
     }, []),
     onExistingPeers: useCallback(async (peers: PeerJoinData[]) => {
+      console.log('[Page] Existing peers:', peers.length, peers.map(p => p.peerId))
       for (const peer of peers) {
         setRemoteParticipants(prev => {
           const updated = new Map(prev)
@@ -101,9 +107,11 @@ export default function MeetingRoom() {
       }
     }, []),
     onPeerJoined: useCallback(async (peerId: string, name: string, userId: string) => {
+      console.log('[Page] Peer joined:', peerId, name, userId)
       setRemoteParticipants(prev => {
         const updated = new Map(prev)
         updated.set(peerId, { name: name || `User ${peerId.slice(0, 6)}`, userId })
+        console.log('[Page] Remote participants count now:', updated.size)
         return updated
       })
 
@@ -122,6 +130,7 @@ export default function MeetingRoom() {
       }
     }, []),
     onPeerLeft: useCallback((peerId: string) => {
+      console.log('[Page] Peer left:', peerId)
       webrtc.closePeerConnection(peerId)
       setRemoteParticipants(prev => {
         const updated = new Map(prev)

@@ -76,6 +76,7 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketReturn {
       ws.onopen = () => {
         if (joinSentRef.current) return
         joinSentRef.current = true
+        console.log('[WS] Connected, sending join for room:', config.meetingId)
         config.onConnectionStatusChange("Connected")
         reconnectAttempts.current = 0
         ws.send(JSON.stringify({ type: "join", roomId: config.meetingId }))
@@ -102,18 +103,22 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketReturn {
           }
 
           if (data.type === "joined") {
+            console.log('[WS] Joined with peerId:', data.peerId, 'hostId:', data.hostId)
             config.onJoined({ peerId: data.peerId ?? "", hostId: data.hostId ?? null })
           }
 
           if (data.type === "existingPeers") {
+            console.log('[WS] Existing peers:', data.peers?.length ?? 0)
             config.onExistingPeers(data.peers ?? [])
           }
 
           if (data.type === "peerJoined") {
+            console.log('[WS] peerJoined:', data.senderPeerId, data.name, data.userId)
             config.onPeerJoined(data.senderPeerId ?? "", data.name ?? "", data.userId ?? "")
           }
 
           if (data.type === "peerLeft") {
+            console.log('[WS] peerLeft:', data.senderPeerId)
             config.onPeerLeft(data.senderPeerId ?? "")
           }
 
