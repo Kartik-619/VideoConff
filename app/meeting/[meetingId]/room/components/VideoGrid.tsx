@@ -1,10 +1,9 @@
 'use client'
 
-import { useMemo, useState, useEffect } from "react"
+import { useMemo } from "react"
 import { useSession } from "next-auth/react"
 import { LayoutCall } from "../../../../components/CallRoom/components/callLayout"
 import VideoTile from '../../../../components/CallRoom/components/VideoTile'
-import type { StreamInfo } from "../types"
 
 interface Props {
   localStream: MediaStream | null
@@ -14,98 +13,115 @@ interface Props {
   cameraOff: boolean
 }
 
+interface ParticipantItem {
+  id: string
+  stream: MediaStream | null
+  isLocal: boolean
+  userName: string
+  userImage: string | undefined
+  hasStream: boolean
+  isVideoOff: boolean
+}
+
 export function VideoGrid({ localStream, remoteStreams, remoteParticipants, socketId, cameraOff }: Props) {
   const { data: session } = useSession()
-  const [videoStates, setVideoStates] = useState<Map<string, boolean>>(new Map())
 
-  useEffect(() => {
-    const newStates = new Map<string, boolean>()
+  const participants: ParticipantItem[] = useMemo(() => {
+    const result: ParticipantItem[] = []
 
-    remoteStreams.forEach((stream, peerId) => {
-      const tracks = stream.getVideoTracks()
-      const enabled = tracks.length > 0 && tracks[0]!.enabled
-      newStates.set(peerId, enabled)
+    result.push({
+      id: "local",
+      stream: localStream,
+      isLocal: true,
+      userName: session?.user?.name || "You",
+      userImage: session?.user?.image || undefined,
+      hasStream: !!localStream,
+      isVideoOff: cameraOff || !localStream
+    })
 
-      const updateState = () => {
-        const t = stream.getVideoTracks()
-        const en = t.length > 0 && t[0]!.enabled
-        setVideoStates(prev => {
-          const next = new Map(prev)
-          next.set(peerId, en)
-          return next
+    remoteParticipants.forEach((participant, peerId) => {
+      if (peerId === socketId) return
+
+      const stream = remoteStreams.get(peerId)
+      if (stream) {
+        const videoTracks = stream.getVideoTracks()
+        const videoEnabled = videoTracks.length > 0 && videoTracks[0]!.enabled
+        result.push({
+          id: peerId,
+          stream,
+          isLocal: false,
+          userName: participant.name || `User ${peerId.slice(0, 6)}`,
+          userImage: undefined,
+          hasStream: true,
+          isVideoOff: !videoEnabled
+        })
+      } else {
+        result.push({
+          id: peerId,
+          stream: null,
+          isLocal: false,
+          userName: participant.name || `User ${peerId.slice(0, 6)}`,
+          userImage: undefined,
+          hasStream: false,
+          isVideoOff: true
         })
       }
-
-      tracks.forEach(track => {
-        track.addEventListener('ended', updateState)
-        track.addEventListener('mute', updateState)
-        track.addEventListener('unmute', updateState)
-      })
-    })
-
-    setVideoStates(prev => {
-      const merged = new Map(prev)
-      newStates.forEach((val, key) => merged.set(key, val))
-      return merged
-    })
-
-    return () => {
-      remoteStreams.forEach(stream => {
-        stream.getTracks().forEach(track => {
-          track.removeEventListener('ended', () => {})
-          track.removeEventListener('mute', () => {})
-          track.removeEventListener('unmute', () => {})
-        })
-      })
-    }
-  }, [remoteStreams])
-
-  const allStreams = useMemo(() => {
-    const result: StreamInfo[] = []
-
-    if (localStream) {
-      result.push({
-        id: "local",
-        stream: localStream,
-        isLocal: true,
-        userName: session?.user?.name || undefined,
-        userImage: session?.user?.image || undefined,
-        isVideoOff: cameraOff
-      })
-    }
-
-    remoteStreams.forEach((stream, peerId) => {
-      if (peerId === socketId) return
-      const participant = remoteParticipants.get(peerId)
-      const hasVideo = videoStates.get(peerId) ?? true
-      result.push({
-        id: peerId,
-        stream,
-        isLocal: false,
-        userName: participant?.name || `User ${peerId.slice(0, 6)}`,
-        userImage: undefined,
-        isVideoOff: !hasVideo
-      })
     })
 
     return result
-  }, [localStream, remoteStreams, remoteParticipants, cameraOff, session?.user?.name, session?.user?.image, socketId, videoStates])
+  }, [localStream, remoteStreams, remoteParticipants, socketId, cameraOff, session?.user?.name, session?.user?.image])
+
+  const totalCount = participants.length
+
+  function renderTile(item: ParticipantItem) {
+    if (!item.hasStream) {
+      return (
+        <div key={item.id} className="relative w-full h-full bg-gray-900 rounded-xl overflow-hidden flex items-center justify-center">
+          <div className="text-center space-y-2">
+            <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center text-white text-2xl font-bold ${
+              item.isLocal
+                ? 'bg-gradient-to-br from-indigo-600 to-purple-600'
+                : 'bg-gradient-to-br from-cyan-600 to-blue-600 animate-pulse'
+            }`}>
+              {item.userName.charAt(0).toUpperCase()}
+            </div>
+            <p className="text-white font-medium">{item.userName}</p>
+            {!item.isLocal && (
+              <p className="text-yellow-400 text-xs font-semibold animate-pulse">Connecting...</p>
+            )}
+            {item.isLocal && (
+              <p className="text-red-400 text-xs font-semibold">Camera permission needed</p>
+            )}
+          </div>
+          <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-sm font-medium">
+            {item.userName}
+          </div>
+          {!item.isLocal && (
+            <div className="absolute top-3 left-3 bg-yellow-500 text-black px-2 py-0.5 rounded-full text-xs font-semibold">
+              Connecting
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    return (
+      <VideoTile
+        key={item.id}
+        stream={item.stream!}
+        isVideoOff={item.isVideoOff}
+        userName={item.userName}
+        userImage={item.userImage}
+        isLocal={item.isLocal}
+      />
+    )
+  }
 
   return (
-    <LayoutCall count={allStreams.length}>
-      {allStreams.map(({ id, stream, isLocal, userName, userImage, isVideoOff }) => {
-        return (
-          <VideoTile
-            key={id}
-            stream={stream}
-            muted={isLocal}
-            isVideoOff={isVideoOff}
-            userName={userName}
-            userImage={userImage}
-            isLocal={isLocal}
-          />
-        )
-      })}
-    </LayoutCall>
+    <div className="flex-1 min-h-0">
+      <LayoutCall count={totalCount}>
+        {participants.map(renderTile)}
+      </LayoutCall>
+    </div>
   )
 }

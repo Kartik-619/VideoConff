@@ -36,6 +36,12 @@ export function useMedia(): UseMediaReturn {
 
   const requestMedia = useCallback(async (): Promise<boolean> => {
     try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast.error("Your browser doesn't support camera/microphone")
+        streamFailed.current = true
+        return false
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: { echoCancellation: true, noiseSuppression: true }
@@ -52,11 +58,15 @@ export function useMedia(): UseMediaReturn {
     } catch (err) {
       streamFailed.current = true
 
-      const isNotAllowed = (err as DOMException)?.name === 'NotAllowedError'
-      if (isNotAllowed) {
-        toast.error("Camera/mic permission denied. Please allow access in your browser settings and rejoin.")
+      const error = err as DOMException
+      if (error.name === 'NotAllowedError') {
+        toast.error("Camera/mic permission DENIED. Click the lock icon in your browser's address bar and allow Camera & Microphone.", { duration: 10000 })
+      } else if (error.name === 'NotFoundError') {
+        toast.error("No camera or microphone found on this device.", { duration: 10000 })
+      } else if (error.name === 'NotReadableError') {
+        toast.error("Camera/mic is in use by another app. Close it and try again.", { duration: 10000 })
       } else {
-        toast.error("Failed to access camera/microphone")
+        toast.error(`Failed to access camera/microphone: ${error.name}. Click the lock icon in the address bar and allow permissions.`, { duration: 10000 })
       }
       return false
     }
