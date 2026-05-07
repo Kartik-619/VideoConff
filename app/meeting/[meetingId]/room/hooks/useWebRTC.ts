@@ -46,6 +46,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
   const pendingPeersRef = useRef<PendingPeer[]>([])
   const pendingOffersRef = useRef<PendingOffer[]>([])
   const pendingIceCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map())
+  const peerTimeoutsRef = useRef<Map<string, { checking?: NodeJS.Timeout, connecting?: NodeJS.Timeout }>>(new Map())
 
   const getSignalingState = useCallback((peerId: string): SignalingState => {
     if (!signalingStateRef.current.has(peerId)) {
@@ -68,6 +69,13 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
   }, [])
 
   const closePeerConnection = useCallback((peerId: string) => {
+    const timeouts = peerTimeoutsRef.current.get(peerId)
+    if (timeouts) {
+      if (timeouts.connecting) clearTimeout(timeouts.connecting)
+      if (timeouts.checking) clearTimeout(timeouts.checking)
+      peerTimeoutsRef.current.delete(peerId)
+    }
+
     const pc = peerConnectionsRef.current.get(peerId)
     if (pc) {
       pc.ontrack = null
@@ -127,8 +135,46 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
+      const timeouts = peerTimeoutsRef.current.get(peerId) || {}
+
+      if (state === 'connecting') {
+        if (timeouts.connecting) clearTimeout(timeouts.connecting)
+        timeouts.connecting = setTimeout(() => {
+          if (pc.connectionState === 'connecting') {
+            const sigState = getSignalingState(peerId)
+            if (!sigState.makingOffer) {
+              ;(async () => {
+                try {
+                  sigState.makingOffer = true
+                  const offer = await pc.createOffer()
+                  await pc.setLocalDescription(offer)
+                  await sendLocalDescription(peerId)
+                } catch {
+                  sigState.makingOffer = false
+                }
+              })()
+            }
+          }
+        }, 15000)
+        peerTimeoutsRef.current.set(peerId, timeouts)
+      } else {
+        if (timeouts.connecting) {
+          clearTimeout(timeouts.connecting)
+          timeouts.connecting = undefined
+          peerTimeoutsRef.current.set(peerId, timeouts)
+        }
+      }
 
       if (state === 'disconnected' || state === 'failed') {
+        if (timeouts.connecting) {
+          clearTimeout(timeouts.connecting)
+          timeouts.connecting = undefined
+        }
+        if (timeouts.checking) {
+          clearTimeout(timeouts.checking)
+          timeouts.checking = undefined
+        }
+        peerTimeoutsRef.current.set(peerId, timeouts)
         if (reconnectingPcsRef.current.has(peerId)) return
 
         reconnectingPcsRef.current.add(peerId)
@@ -151,12 +197,53 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
 
       if (state === 'connected') {
         reconnectingPcsRef.current.delete(peerId)
+        if (timeouts.connecting) {
+          clearTimeout(timeouts.connecting)
+          timeouts.connecting = undefined
+        }
+        if (timeouts.checking) {
+          clearTimeout(timeouts.checking)
+          timeouts.checking = undefined
+        }
+        peerTimeoutsRef.current.set(peerId, timeouts)
       }
     }
 
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed') {
+      const state = pc.iceConnectionState
+      const timeouts = peerTimeoutsRef.current.get(peerId) || {}
+
+      if (state === 'failed') {
         pc.restartIce()
+        const sigState = getSignalingState(peerId)
+        if (!sigState.makingOffer) {
+          ;(async () => {
+            try {
+              sigState.makingOffer = true
+              const offer = await pc.createOffer()
+              await pc.setLocalDescription(offer)
+              await sendLocalDescription(peerId)
+            } catch {
+              sigState.makingOffer = false
+            }
+          })()
+        }
+      }
+
+      if (state === 'checking') {
+        if (timeouts.checking) clearTimeout(timeouts.checking)
+        timeouts.checking = setTimeout(() => {
+          if (pc.iceConnectionState === 'checking') {
+            pc.restartIce()
+          }
+        }, 15000)
+        peerTimeoutsRef.current.set(peerId, timeouts)
+      } else {
+        if (timeouts.checking) {
+          clearTimeout(timeouts.checking)
+          timeouts.checking = undefined
+          peerTimeoutsRef.current.set(peerId, timeouts)
+        }
       }
     }
 
@@ -360,6 +447,11 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     peerConnectionsRef.current.clear()
     signalingStateRef.current.clear()
     reconnectingPcsRef.current.clear()
+    peerTimeoutsRef.current.forEach(timeouts => {
+      if (timeouts.connecting) clearTimeout(timeouts.connecting)
+      if (timeouts.checking) clearTimeout(timeouts.checking)
+    })
+    peerTimeoutsRef.current.clear()
     pendingPeersRef.current = []
     pendingOffersRef.current = []
     pendingIceCandidatesRef.current.clear()
