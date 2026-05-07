@@ -84,6 +84,7 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketReturn {
       ws.onmessage = async (e) => {
         try {
           const data = JSON.parse(e.data) as SignalingMessage
+          console.log('WS received:', data.type, data)
 
           if (data.type === "lobbyUpdate") {
             config.onLobbyUpdate(data.participants)
@@ -132,7 +133,8 @@ export function useWebSocket(config: UseWebSocketConfig): UseWebSocketReturn {
           if (data.type === "stream-unavailable") {
             config.onStreamUnavailable(data.senderPeerId)
           }
-        } catch {
+        } catch (err) {
+          console.error('WS message error:', err, 'Data:', e.data)
         }
       }
 

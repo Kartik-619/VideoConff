@@ -118,13 +118,20 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     signalingStateRef.current.set(peerId, { makingOffer: false, ignoreOffer: false })
 
     pc.ontrack = (event) => {
+      console.log(`Peer ${peerId} received remote track:`, event.track, event.streams)
       if (event.streams && event.streams[0]) {
         config.onAppendRemoteStream(peerId, event.streams[0])
+      } else if (event.track) {
+        const remoteStream = new MediaStream()
+        remoteStream.addTrack(event.track)
+        config.onAppendRemoteStream(peerId, remoteStream)
       }
     }
 
     pc.onicecandidate = (event) => {
+      console.log(`Peer ${peerId} ICE candidate:`, event.candidate ? 'generated' : 'end of candidates')
       if (event.candidate && config.wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log(`Peer ${peerId} sending ICE candidate:`, event.candidate)
         config.wsRef.current.send(JSON.stringify({
           type: "ice-candidate",
           candidate: event.candidate,
@@ -247,6 +254,10 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       }
     }
 
+    pc.onsignalingstatechange = () => {
+      console.log(`Peer ${peerId} signaling state: ${pc.signalingState}`)
+    }
+
     pc.onnegotiationneeded = async () => {
       try {
         const sigState = getSignalingState(peerId)
@@ -258,19 +269,26 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
         sigState.makingOffer = false
 
         await sendLocalDescription(peerId)
-      } catch {
+      } catch (err) {
+        console.error(`Peer ${peerId} negotiation error:`, err)
         const sigState = getSignalingState(peerId)
         sigState.makingOffer = false
       }
     }
 
     if (config.localStreamRef.current) {
-      config.localStreamRef.current.getTracks().forEach(track => {
+      const stream = config.localStreamRef.current
+      console.log(`Peer ${peerId} adding ${stream.getTracks().length} local tracks`)
+      stream.getTracks().forEach(track => {
         try {
-          pc.addTrack(track, config.localStreamRef.current!)
-        } catch {
+          pc.addTrack(track, stream)
+          console.log(`Peer ${peerId} added track:`, track.kind, track.id)
+        } catch (err) {
+          console.error(`Peer ${peerId} failed to add track:`, err)
         }
       })
+    } else {
+      console.warn(`Peer ${peerId} no local stream available when creating peer connection`)
     }
 
     const bufferedCandidates = pendingIceCandidatesRef.current.get(peerId)
@@ -303,19 +321,31 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     }
 
     const polite = myId < peerId
-    if (!polite) return
+    console.log(`Peer ${peerId} setup - myId: ${myId}, polite: ${polite}, pc state: ${pc.signalingState}`)
+
+    if (!polite) {
+      console.log(`Peer ${peerId} is impolite (${myId} >= ${peerId}), waiting for offer from peer`)
+      return
+    }
 
     try {
       const sigState = getSignalingState(peerId)
-      if (sigState.makingOffer) return
+      if (sigState.makingOffer) {
+        console.log(`Peer ${peerId} already making offer, skipping`)
+        return
+      }
 
       sigState.makingOffer = true
+      console.log(`Peer ${peerId} (polite) creating offer...`)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
+      console.log(`Peer ${peerId} set local description (offer), state: ${pc.signalingState}`)
       sigState.makingOffer = false
 
       await sendLocalDescription(peerId)
+      console.log(`Peer ${peerId} offer sent`)
     } catch (err) {
+      console.error(`Peer ${peerId} setup error:`, err)
       const sigState = getSignalingState(peerId)
       sigState.makingOffer = false
     }
@@ -323,6 +353,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
 
   const handleOffer = useCallback(async (data: { senderPeerId: string; sdp: RTCSessionDescriptionInit }) => {
     const peerId = data.senderPeerId
+    console.log(`Peer ${peerId} received offer:`, data.sdp.type)
 
     if (config.streamFailed.current) {
       if (config.wsRef.current?.readyState === WebSocket.OPEN) {
@@ -339,6 +370,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       const existingOffer = pendingOffersRef.current.find(p => p.peerId === peerId)
       if (!existingOffer) {
         pendingOffersRef.current.push({ peerId, sdp: data.sdp })
+        console.log(`Peer ${peerId} offer queued - local stream not ready`)
       }
       return
     }
@@ -347,6 +379,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
 
     let pc: RTCPeerConnection | null = peerConnectionsRef.current.get(peerId) ?? null
     if (!pc) {
+      console.log(`Peer ${peerId} creating new connection for incoming offer`)
       pc = await createPeerConnection(peerId)
       if (!pc) return
     }
@@ -358,29 +391,43 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     const offerCollision = readyForOffer === false
 
     sigState.ignoreOffer = !polite && offerCollision
-    if (sigState.ignoreOffer) return
+    if (sigState.ignoreOffer) {
+      console.log(`Peer ${peerId} ignoring offer due to collision (impolite peer)`)
+      return
+    }
 
     try {
       if (offerCollision) {
+        console.log(`Peer ${peerId} handling offer collision with rollback`)
         await pc.setLocalDescription({ type: "rollback" } as RTCSessionDescription)
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+      console.log(`Peer ${peerId} set remote description (offer) successfully`)
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
+      console.log(`Peer ${peerId} created and set answer`)
       await sendLocalDescription(peerId)
+      console.log(`Peer ${peerId} sent answer`)
     } catch (err) {
+      console.error(`Peer ${peerId} handle offer error:`, err)
     }
   }, [])
 
   const handleAnswer = useCallback(async (data: { senderPeerId: string; sdp: RTCSessionDescriptionInit }) => {
     const peerId = data.senderPeerId
     const pc = peerConnectionsRef.current.get(peerId)
-    if (!pc) return
+    if (!pc) {
+      console.warn(`Peer ${peerId} received answer but no peer connection exists`)
+      return
+    }
 
     try {
+      console.log(`Peer ${peerId} setting remote description (answer):`, data.sdp.type)
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
+      console.log(`Peer ${peerId} set remote description (answer) successfully, connection state:`, pc.connectionState)
     } catch (err) {
+      console.error(`Peer ${peerId} handle answer error:`, err)
     }
   }, [])
 
@@ -390,14 +437,20 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
 
     if (pc && data.candidate) {
       try {
+        console.log(`Peer ${peerId} adding ICE candidate:`, data.candidate)
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate))
-      } catch {
+        console.log(`Peer ${peerId} ICE candidate added successfully`)
+      } catch (err) {
+        console.error(`Peer ${peerId} failed to add ICE candidate:`, err, data.candidate)
       }
     } else if (data.candidate) {
+      console.log(`Peer ${peerId} buffering ICE candidate (no peer connection yet)`)
       if (!pendingIceCandidatesRef.current.has(peerId)) {
         pendingIceCandidatesRef.current.set(peerId, [])
       }
       pendingIceCandidatesRef.current.get(peerId)!.push(data.candidate)
+    } else {
+      console.log(`Peer ${peerId} received end of ICE candidates`)
     }
   }, [])
 
