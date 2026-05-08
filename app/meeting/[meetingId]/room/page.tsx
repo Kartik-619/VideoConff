@@ -285,24 +285,25 @@ export default function MeetingRoom() {
       <MeetingHeader participantCount={remotePeerCount + 1} connectionStatus={connectionStatus} />
 
       {media.streamFailed.current && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/80">
-          <div className="bg-gray-900 border-2 border-red-500 rounded-2xl p-8 max-w-md text-center">
-            <div className="text-red-400 text-xl font-bold mb-4">Camera/Microphone Access Denied</div>
-            <p className="text-gray-300 mb-4 text-sm">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4">
+          <div className="bg-gray-900 border-2 border-red-500 rounded-2xl p-6 md:p-8 max-w-md w-full text-center shadow-2xl">
+            <div className="text-red-400 text-lg md:text-xl font-bold mb-4">Camera/Microphone Access Denied</div>
+            <p className="text-gray-300 mb-6 text-xs md:text-sm leading-relaxed">
               Your browser is blocking camera access. This is why you can't see others - WebRTC cannot start without camera permission.
             </p>
-            <div className="text-left bg-gray-800 rounded-lg p-4 mb-4 text-xs text-gray-300 space-y-2">
-              <p><strong className="text-white">Fix in Chrome:</strong></p>
-              <p>1. Click the 🔒 <strong className="text-white">lock icon</strong> in the address bar (left of the URL)</p>
-              <p>2. Click <strong className="text-white">Site settings</strong></p>
-              <p>3. Set Camera and Microphone to <strong className="text-green-400">Allow</strong></p>
-              <p>4. <strong className="text-white">Refresh this page</strong></p>
+            <div className="text-left bg-gray-800/50 rounded-xl p-4 mb-6 text-[11px] md:text-xs text-gray-300 space-y-3 border border-gray-700">
+              <p><strong className="text-white">How to fix:</strong></p>
+              <div className="space-y-2">
+                <p>1. Click the 🔒 <strong className="text-white">lock icon</strong> in the address bar</p>
+                <p>2. Set Camera and Microphone to <strong className="text-green-400">Allow</strong></p>
+                <p>3. <strong className="text-white">Refresh this page</strong> to join the call</p>
+              </div>
             </div>
             <button
               onClick={() => window.location.reload()}
-              className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-lg font-semibold"
+              className="w-full md:w-auto bg-red-600 hover:bg-red-500 text-white px-8 py-3 rounded-xl font-bold transition-all active:scale-95 shadow-lg shadow-red-900/20"
             >
-              Retry
+              Try Again
             </button>
           </div>
         </div>

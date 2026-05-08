@@ -88,12 +88,12 @@ export default function VideoTile({
       )}
 
       {!displayVideo && (
-        <div className="absolute top-3 left-3 bg-red-500 text-white px-2 py-0.5 rounded-full text-xs font-semibold">
+        <div className="absolute top-2 left-2 md:top-3 md:left-3 bg-red-500 text-white px-2 py-0.5 rounded-full text-[10px] md:text-xs font-semibold">
           Video Off
         </div>
       )}
 
-      <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-sm font-medium">
+      <div className="absolute bottom-2 left-2 md:bottom-3 md:left-3 bg-black/70 backdrop-blur-sm text-white px-2 py-1 md:px-3 md:py-1.5 rounded-lg text-xs md:text-sm font-medium">
         {userName || (isLocal ? 'You' : 'Participant')}
       </div>
     </div>

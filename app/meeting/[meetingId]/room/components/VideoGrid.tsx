@@ -77,27 +77,27 @@ export function VideoGrid({ localStream, remoteStreams, remoteParticipants, sock
     if (!item.hasStream) {
       return (
         <div key={item.id} className="relative w-full h-full bg-gray-900 rounded-xl overflow-hidden flex items-center justify-center">
-          <div className="text-center space-y-2">
-            <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center text-white text-2xl font-bold ${
+          <div className="text-center space-y-2 p-2">
+            <div className={`w-16 h-16 md:w-20 md:h-20 mx-auto rounded-full flex items-center justify-center text-white text-xl md:text-2xl font-bold ${
               item.isLocal
                 ? 'bg-gradient-to-br from-indigo-600 to-purple-600'
                 : 'bg-gradient-to-br from-cyan-600 to-blue-600 animate-pulse'
             }`}>
               {item.userName.charAt(0).toUpperCase()}
             </div>
-            <p className="text-white font-medium">{item.userName}</p>
+            <p className="text-white font-medium text-sm md:text-base truncate max-w-[120px] md:max-w-none mx-auto">{item.userName}</p>
             {!item.isLocal && (
-              <p className="text-yellow-400 text-xs font-semibold animate-pulse">Connecting...</p>
+              <p className="text-yellow-400 text-[10px] md:text-xs font-semibold animate-pulse">Connecting...</p>
             )}
             {item.isLocal && (
-              <p className="text-red-400 text-xs font-semibold">Camera permission needed</p>
+              <p className="text-red-400 text-[10px] md:text-xs font-semibold">Camera permission needed</p>
             )}
           </div>
-          <div className="absolute bottom-3 left-3 bg-black/70 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-sm font-medium">
+          <div className="absolute bottom-2 left-2 md:bottom-3 md:left-3 bg-black/70 backdrop-blur-sm text-white px-2 py-1 md:px-3 md:py-1.5 rounded-lg text-[10px] md:text-sm font-medium">
             {item.userName}
           </div>
           {!item.isLocal && (
-            <div className="absolute top-3 left-3 bg-yellow-500 text-black px-2 py-0.5 rounded-full text-xs font-semibold">
+            <div className="absolute top-2 left-2 md:top-3 md:left-3 bg-yellow-500 text-black px-1.5 py-0.5 rounded-full text-[10px] md:text-xs font-semibold">
               Connecting
             </div>
           )}
