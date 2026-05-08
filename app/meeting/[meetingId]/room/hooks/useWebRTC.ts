@@ -94,6 +94,25 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     config.onClosePeerConnection(peerId)
   }, [])
 
+  const processBufferedIceCandidates = useCallback(async (peerId: string) => {
+    const pc = peerConnectionsRef.current.get(peerId)
+    if (!pc || !pc.remoteDescription) return
+
+    const candidates = pendingIceCandidatesRef.current.get(peerId) || []
+    if (candidates.length === 0) return
+
+    console.log(`Peer ${peerId} processing ${candidates.length} buffered ICE candidates`)
+    pendingIceCandidatesRef.current.delete(peerId)
+
+    for (const candidate of candidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate))
+      } catch (err) {
+        console.error(`Peer ${peerId} failed to add buffered ICE candidate:`, err)
+      }
+    }
+  }, [])
+
   const createPeerConnection = useCallback(async (peerId: string): Promise<RTCPeerConnection | null> => {
     if (peerConnectionsRef.current.has(peerId)) {
       return peerConnectionsRef.current.get(peerId)!
@@ -163,6 +182,8 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
                   await pc.setLocalDescription(offer)
                   await sendLocalDescription(peerId)
                 } catch {
+                  // error handled
+                } finally {
                   sigState.makingOffer = false
                 }
               })()
@@ -238,6 +259,8 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
               await pc.setLocalDescription(offer)
               await sendLocalDescription(peerId)
             } catch {
+              // error handled
+            } finally {
               sigState.makingOffer = false
             }
           })()
@@ -273,11 +296,10 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
         sigState.makingOffer = true
         const offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
-        sigState.makingOffer = false
-
         await sendLocalDescription(peerId)
       } catch (err) {
         console.error(`Peer ${peerId} negotiation error:`, err)
+      } finally {
         const sigState = getSignalingState(peerId)
         sigState.makingOffer = false
       }
@@ -296,17 +318,6 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       })
     } else {
       console.warn(`Peer ${peerId} no local stream available when creating peer connection`)
-    }
-
-    const bufferedCandidates = pendingIceCandidatesRef.current.get(peerId)
-    if (bufferedCandidates && bufferedCandidates.length > 0) {
-      for (const candidate of bufferedCandidates) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate))
-        } catch {
-        }
-      }
-      pendingIceCandidatesRef.current.delete(peerId)
     }
 
     return pc
@@ -347,12 +358,11 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
       console.log(`Peer ${peerId} set local description (offer), state: ${pc.signalingState}`)
-      sigState.makingOffer = false
-
       await sendLocalDescription(peerId)
       console.log(`Peer ${peerId} offer sent`)
     } catch (err) {
       console.error(`Peer ${peerId} setup error:`, err)
+    } finally {
       const sigState = getSignalingState(peerId)
       sigState.makingOffer = false
     }
@@ -407,10 +417,14 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       if (offerCollision) {
         console.log(`Peer ${peerId} handling offer collision with rollback`)
         await pc.setLocalDescription({ type: "rollback" } as RTCSessionDescription)
+        sigState.makingOffer = false
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
       console.log(`Peer ${peerId} set remote description (offer) successfully`)
+      
+      await processBufferedIceCandidates(peerId)
+
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
       console.log(`Peer ${peerId} created and set answer`)
@@ -433,6 +447,8 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       console.log(`Peer ${peerId} setting remote description (answer):`, data.sdp.type)
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
       console.log(`Peer ${peerId} set remote description (answer) successfully, connection state:`, pc.connectionState)
+      
+      await processBufferedIceCandidates(peerId)
     } catch (err) {
       console.error(`Peer ${peerId} handle answer error:`, err)
     }
@@ -442,7 +458,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     const peerId = data.senderPeerId
     const pc = peerConnectionsRef.current.get(peerId)
 
-    if (pc && data.candidate) {
+    if (pc && pc.remoteDescription && data.candidate) {
       try {
         console.log(`Peer ${peerId} adding ICE candidate:`, data.candidate)
         await pc.addIceCandidate(new RTCIceCandidate(data.candidate))
@@ -451,7 +467,7 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
         console.error(`Peer ${peerId} failed to add ICE candidate:`, err, data.candidate)
       }
     } else if (data.candidate) {
-      console.log(`Peer ${peerId} buffering ICE candidate (no peer connection yet)`)
+      console.log(`Peer ${peerId} buffering ICE candidate (no connection or remote description)`)
       if (!pendingIceCandidatesRef.current.has(peerId)) {
         pendingIceCandidatesRef.current.set(peerId, [])
       }

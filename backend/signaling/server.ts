@@ -186,19 +186,21 @@ app.post("/leave", async (req, res) => {
     for (const existingPeerId of peersToRemove) {
       const peer = room.peers.get(existingPeerId);
       if (!peer) continue;
-              (peer.socket as WebSocket & { __replaced?: boolean }).__replaced = true;
+      (peer.socket as WebSocket & { __replaced?: boolean }).__replaced = true;
       peer.socket.close();
       room.peers.delete(existingPeerId);
+
+      // Notify other peers about EACH removed peer connection
+      room.peers.forEach((otherPeer) => {
+        safeSend(otherPeer.socket, {
+          type: "peerLeft",
+          senderPeerId: existingPeerId,
+        });
+      });
     }
 
     if (peersToRemove.length > 0) {
       await redis.srem(`meeting:${meetingId}:participants`, userId);
-      room.peers.forEach((otherPeer) => {
-        safeSend(otherPeer.socket, {
-          type: "peerLeft",
-          senderPeerId: userId,
-        });
-      });
       await broadcastLobby(meetingId);
     }
 
