@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import toast from "react-hot-toast";
 import { useSession } from "next-auth/react"
+<<<<<<< Updated upstream
 import { types as mediasoupTypes } from "mediasoup-client";
 import { LayoutCall } from "../../../components/CallRoom/components/callLayout";
 import VideoTile from '../../../components/CallRoom/components/VideoTile';
@@ -17,6 +18,16 @@ import {
   FaUserFriends,
   FaPhoneSlash
 } from "react-icons/fa";
+=======
+import { useMedia } from "./hooks/useMedia"
+import { useMediasoup } from "./hooks/useMediasoup"
+import { useWebSocket } from "./hooks/useWebSocket"
+import { MeetingHeader } from "./components/MeetingHeader"
+import { VideoGrid } from "./components/VideoGrid"
+import { ChatPanel } from "./components/ChatPanel"
+import { MeetingControlBar } from "./components/ControlBar"
+import type { ChatMessage, PeerJoinData } from "./types"
+>>>>>>> Stashed changes
 
 import { MessageSquare } from "lucide-react";
 
@@ -30,9 +41,26 @@ export default function MeetingRoom() {
   const router = useRouter()
   const { data: session } = useSession()
 
+<<<<<<< Updated upstream
+=======
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map())
+  const [remoteParticipants, setRemoteParticipants] = useState<Map<string, { name: string; userId: string }>>(new Map())
+  const [hostId, setHostId] = useState<string | null>(null)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState("Connecting...")
+  const [participantCount, setParticipantCount] = useState(0)
+  const [debugOpen, setDebugOpen] = useState(false)
+  const [remotePeerCount, setRemotePeerCount] = useState(0)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+
+  const meetingEndedRef = useRef(false)
+  const isCleaningUpRef = useRef(false)
+  const socketIdRef = useRef<string | null>(null)
+>>>>>>> Stashed changes
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttempts = useRef(0)
 
+<<<<<<< Updated upstream
 
   const consumedProducersRef = useRef<Set<string>>(new Set());
 
@@ -607,11 +635,161 @@ audioProducerRef.current = audioProducer;
         } catch (error) {
           console.error("Error consuming stream:", error);
         }
+=======
+  const media = useMedia()
+  const mediasoup = useMediasoup({
+    wsRef,
+    onAppendRemoteStream: useCallback((peerId: string, stream: MediaStream) => {
+      setRemoteStreams(prev => {
+        const updated = new Map(prev)
+        updated.set(peerId, stream)
+        return updated
+      })
+    }, []),
+    onRemoveRemoteStream: useCallback((peerId: string) => {
+      setRemoteStreams(prev => {
+        const updated = new Map(prev)
+        updated.delete(peerId)
+        return updated
+      })
+    }, [])
+  })
+
+  const ws = useWebSocket({
+    meetingId,
+    localStreamReady: media.localStreamReady,
+    streamFailed: media.streamFailed,
+    socketIdRef,
+    wsRef,
+    onJoined: useCallback((data: { peerId: string; hostId: string | null }) => {
+      socketIdRef.current = data.peerId
+      setHostId(data.hostId)
+      setRemoteStreams(new Map())
+      setRemoteParticipants(new Map())
+    }, []),
+    onExistingPeers: useCallback(async (peers: PeerJoinData[]) => {
+      for (const peer of peers) {
+        setRemoteParticipants(prev => {
+          const updated = new Map(prev)
+          updated.set(peer.peerId, {
+            name: peer.name || `User ${(peer.peerId || "").slice(0, 6)}`,
+            userId: peer.userId
+          })
+          return updated
+        })
+      }
+    }, []),
+    onPeerJoined: useCallback(async (peerId: string, name: string, userId: string) => {
+      setRemoteParticipants(prev => {
+        const updated = new Map(prev)
+        updated.set(peerId, { name: name || `User ${peerId.slice(0, 6)}`, userId })
+        return updated
+      })
+    }, []),
+    onPeerLeft: useCallback((peerId: string) => {
+      setRemoteParticipants(prev => {
+        const updated = new Map(prev)
+        updated.delete(peerId)
+        return updated
+      })
+      setRemoteStreams(prev => {
+        const updated = new Map(prev)
+        updated.delete(peerId)
+        return updated
+      })
+    }, []),
+    onRtpCapabilities: useCallback(async (rtpCapabilities) => {
+      await mediasoup.createDevice(rtpCapabilities)
+      ws.sendMessage("createTransport", { direction: "send" })
+      ws.sendMessage("createTransport", { direction: "recv" })
+    }, []),
+    onTransportCreated: useCallback(async (data) => {
+      await mediasoup.handleTransportCreated(data)
+      if (data.direction === "send" && media.localStreamReady.current) {
+        const tracks = media.localStreamRef.current?.getTracks() || []
+        for (const track of tracks) {
+          await mediasoup.produce(track)
+        }
+      }
+    }, [media.localStreamReady.current]),
+    onProduced: useCallback(async (data) => {
+      console.log("Track produced:", data.producerId)
+    }, []),
+    onConsumerCreated: useCallback(async (data) => {
+      await mediasoup.handleConsumerCreated(data)
+    }, []),
+    onProducer: useCallback(async (data) => {
+      await mediasoup.consume(data.producerId, data.senderPeerId)
+    }, []),
+    onProducerClosed: useCallback(() => {}, []),
+    onConsumerClosed: useCallback(() => {}, []),
+    onStreamUnavailable: useCallback((senderPeerId: string) => {
+      setRemoteStreams(prev => {
+        const updated = new Map(prev)
+        updated.delete(senderPeerId)
+        return updated
+      })
+    }, []),
+    onChatMessage: useCallback((data) => {
+      setMessages(prev => {
+        const next = [...prev, {
+          text: data.message,
+          name: data.name,
+          userId: data.userId,
+          timestamp: data.timestamp,
+        }]
+        if (next.length > MAX_MESSAGES) {
+          return next.slice(next.length - MAX_MESSAGES)
+        }
+        return next
+      })
+    }, []),
+    onMeetingEnded: useCallback(() => {
+      if (meetingEndedRef.current || isCleaningUpRef.current) return
+      isCleaningUpRef.current = true
+      meetingEndedRef.current = true
+      wsRef.current?.close()
+      wsRef.current = null
+      setRemoteStreams(new Map())
+      setRemoteParticipants(new Map())
+      router.replace("/")
+    }, []),
+    onLobbyUpdate: useCallback(() => {}, []),
+    onConnectionStatusChange: useCallback((status: string) => {
+      setConnectionStatus(status)
+    }, []),
+    onParticipantCountChange: useCallback((count: number) => {
+      setParticipantCount(count)
+    }, [])
+  })
+
+  const connectAndRequestMedia = useCallback(async () => {
+    await ws.connect()
+
+    const success = await media.requestMedia()
+    if (success) {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "getParticipants" }))
+>>>>>>> Stashed changes
       }
     }
 
+<<<<<<< Updated upstream
     ws.onclose = () => {
       console.log("WS closed");
+=======
+  const cleanupAndExit = useCallback(() => {
+    if (meetingEndedRef.current || isCleaningUpRef.current) return
+    isCleaningUpRef.current = true
+    meetingEndedRef.current = true
+    media.cleanup()
+    mediasoup.cleanup()
+    ws.disconnect()
+    setRemoteStreams(new Map())
+    setRemoteParticipants(new Map())
+    router.replace("/")
+  }, [])
+>>>>>>> Stashed changes
 
       setConnectionStatus("Disconnected");
       wsRef.current = null;
@@ -628,8 +806,16 @@ audioProducerRef.current = audioProducer;
   const joinedRef = useRef(false);
 
   useEffect(() => {
+<<<<<<< Updated upstream
 
     if (!meetingId || !session?.user?.id) return;
+=======
+    setRemotePeerCount(remoteStreams.size)
+
+    const interval = setInterval(() => {
+      setRemotePeerCount(remoteStreams.size)
+    }, 2000)
+>>>>>>> Stashed changes
 
     if (startedRef.current) return; // prevents strict mode double mount
     startedRef.current = true;
@@ -731,6 +917,7 @@ router.replace("/");
         {allStreams.map(({ id, stream, isLocal, userName, userImage, isVideoOff }) => {
           const hasVideo = stream.getVideoTracks().length > 0;
 
+<<<<<<< Updated upstream
           // Always show VideoTile, even without video tracks (for avatar display)
           return (
             <VideoTile
@@ -745,6 +932,41 @@ router.replace("/");
           );
         })}
       </LayoutCall>
+=======
+      <button
+        onClick={() => setDebugOpen(!debugOpen)}
+        className="fixed top-16 right-4 z-50 bg-yellow-600 text-white px-3 py-1 rounded-md text-xs font-bold hover:bg-yellow-500"
+      >
+        {debugOpen ? 'HIDE DEBUG' : 'DEBUG'}
+      </button>
+
+      {debugOpen && (
+        <div className="fixed top-16 left-4 z-50 bg-gray-900/95 border border-yellow-500 text-green-400 p-4 rounded-lg text-xs font-mono space-y-1 max-w-sm shadow-2xl">
+          <div className="text-yellow-400 font-bold text-sm mb-2 border-b border-yellow-500/50 pb-1">CONNECTION STATUS</div>
+          <div>WS Status: <span className={connectionStatus === 'Connected' ? 'text-green-400' : 'text-red-400'}>{connectionStatus}</span></div>
+          <div>My Peer ID: <span className="text-white">{socketIdRef.current || 'not set'}</span></div>
+          <div>Local Stream: <span className={media.localStream ? 'text-green-400' : 'text-red-400'}>{media.localStream ? 'ready' : 'not ready'}</span></div>
+          <div>Local Video Ready: <span className={media.localStreamReady.current ? 'text-green-400' : 'text-red-400'}>{media.localStreamReady.current ? 'yes' : 'no'}</span></div>
+          <div>Camera: <span className={media.cameraOff ? 'text-red-400' : 'text-green-400'}>{media.cameraOff ? 'OFF' : 'ON'}</span></div>
+          <div className="border-t border-yellow-500/50 pt-1 mt-1">
+            Remote Participants: <span className="text-white">{remoteParticipants.size}</span>
+          </div>
+          <div>
+            {Array.from(remoteParticipants.entries()).map(([id, p]) => (
+              <div key={id} className="ml-2 text-cyan-400">- {p.name} ({id.slice(0,8)}...)</div>
+            ))}
+          </div>
+          <div className="border-t border-yellow-500/50 pt-1 mt-1">
+            Remote Streams: <span className="text-white">{remoteStreams.size}</span>
+          </div>
+          <div>
+            {Array.from(remoteStreams.keys()).map(id => (
+              <div key={id} className="ml-2 text-green-400">- stream from {id.slice(0,8)}...</div>
+            ))}
+          </div>
+        </div>
+      )}
+>>>>>>> Stashed changes
 
       {chatOpen && (
   <div className="absolute right-4 top-16 w-80 h-[420px] bg-[#0f172a] text-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700">

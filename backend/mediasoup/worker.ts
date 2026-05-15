@@ -24,4 +24,8 @@ export const createWorker = async () => {
   });
 
   return worker;
+<<<<<<< Updated upstream
 };
+=======
+};
+>>>>>>> Stashed changes
