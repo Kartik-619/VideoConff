@@ -23,9 +23,6 @@ import { redis } from "../lib/redis";
 import { Peer, Room } from "./types/types";
 
 import * as mediasoup from 'mediasoup';
-import { createRouter } from '../mediasoup/router';
-import { createTransport } from '../mediasoup/transport';
-import { createWebRTCServer } from '../mediasoup/webrtc';
 
 let webRtcServer: mediasoup.types.WebRtcServer;
 
@@ -100,20 +97,14 @@ async function getOrCreateRoom(roomId: string): Promise<Room> {
   console.log(`[room] Acquiring lock to create room ${roomId}`);
 
   const creationPromise = (async () => {
-<<<<<<< Updated upstream
-    console.log(`[room][pid:${process.pid}] Creating router for room ${roomId}`);
     const router = await createRouter();
     const audioLevelObserver = await router.createAudioLevelObserver({
       maxEntries: 1,
       threshold: -80,
-      interval: 800,
+      interval: 800
     });
 
     const room: Room = { router, peers: new Map(), audioLevelObserver };
-=======
-    const router = await createRouter();
-    const room: Room = { router, peers: new Map() };
->>>>>>> Stashed changes
 
     // Double-check: another call might have created the room during our async work
     if (rooms.has(roomId)) {
@@ -149,10 +140,6 @@ function scheduleRoomDeletion(roomId: string) {
     deletionTimers.delete(roomId);
     const latestRoom = rooms.get(roomId);
     if (latestRoom && latestRoom.peers.size === 0) {
-<<<<<<< Updated upstream
-      latestRoom.audioLevelObserver.close();
-=======
->>>>>>> Stashed changes
       latestRoom.router.close();
       rooms.delete(roomId);
       console.log(`[room] Deleted room ${roomId} after idle timeout`);
@@ -200,10 +187,6 @@ function broadcastMeetingEnded(roomId: string) {
 
 /* ---------------- HTTP ---------------- */
 
-<<<<<<< Updated upstream
-app.post("/endMeeting", (req, res) => {
-  broadcastMeetingEnded(req.body.meetingId);
-=======
 app.post("/leave", async (req, res) => {
   const { meetingId, userId, token } = req.body;
   if (!meetingId || !userId) {
@@ -295,7 +278,6 @@ app.post("/endMeeting", async (req, res) => {
     }
   }
 
->>>>>>> Stashed changes
   res.json({ ok: true });
 });
 
@@ -315,9 +297,6 @@ app.post("/startMeeting", async (req, res) => {
 /* ---------------- SERVER ---------------- */
 
 async function startServer() {
-<<<<<<< Updated upstream
-  const webRtcServer = await createWebRTCServer();
-=======
   if (!process.env.NEXTAUTH_SECRET) {
     console.error("FATAL: NEXTAUTH_SECRET is not set");
     process.exit(1);
@@ -325,7 +304,6 @@ async function startServer() {
 
   webRtcServer = await createWebRTCServer();
 
->>>>>>> Stashed changes
   const PORT = process.env.PORT || 8080;
   const server = app.listen(PORT, () => console.log(`WS Server running on ${PORT}`));
 
@@ -408,9 +386,6 @@ async function startServer() {
             // Cancel any pending deletion — room is active again
             cancelDeletionTimer(roomId!);
 
-<<<<<<< Updated upstream
-            safeSend(ws, { type: "joined", peerId });
-=======
             safeSend(ws, { type: "joined", peerId, hostId: room.peers.get(Array.from(room.peers.keys())[0])?.userId || null });
             
             // Send rtpCapabilities
@@ -419,7 +394,6 @@ async function startServer() {
               data: room.router.rtpCapabilities
             });
 
->>>>>>> Stashed changes
             await broadcastLobby(roomId!);
 
             safeSend(ws, {
@@ -484,35 +458,6 @@ async function startServer() {
           room.peers.forEach((p: Peer) => safeSend(p.socket, messagePayload));
         }
 
-<<<<<<< Updated upstream
-        /* ---------------- MEDIASOUP ACTIONS ---------------- */
-        if (data.type === "createTransport") {
-          const room = rooms.get(roomId!);
-          const peer = room?.peers.get(peerId!);
-          if (!room || !peer) return;
-
-          const transport = await createTransport(room.router, webRtcServer);
-          peer.transports.set(transport.id, transport);
-
-          safeSend(ws, {
-            type: "transportCreated",
-            data: {
-              direction: data.direction,
-              id: transport.id,
-              iceParameters: transport.iceParameters,
-              iceCandidates: transport.iceCandidates,
-              dtlsParameters: transport.dtlsParameters,
-            },
-          });
-        }
-
-        if (data.type === "connectTransport") {
-          const transport = rooms.get(roomId!)?.peers.get(peerId!)?.transports.get(data.transportId);
-          if (transport) await transport.connect({ dtlsParameters: data.dtlsParameters });
-        }
-
-        if (data.type === "producer") {
-=======
         /* ---------------- MEDIASOUP SIGNALING ---------------- */
 
         if (data.type === "createTransport") {
@@ -563,24 +508,10 @@ async function startServer() {
 
         if (data.type === "producer") {
           const { transportId, kind, rtpParameters } = data;
->>>>>>> Stashed changes
           const room = rooms.get(roomId!);
           const peer = room?.peers.get(peerId!);
           if (!room || !peer) return;
 
-<<<<<<< Updated upstream
-          const transport = peer.transports.get(data.transportId);
-          if (!transport) return;
-
-          const producer = await transport.produce({
-            kind: data.kind,
-            rtpParameters: data.rtpParameters,
-          });
-
-          peer.producers.set(producer.id, producer);
-          if (producer.kind === "audio") {
-            room.audioLevelObserver.addProducer({ producerId: producer.id });
-=======
           const transport = peer.transports.get(transportId);
           if (!transport) return;
 
@@ -598,10 +529,12 @@ async function startServer() {
               if (otherPeerId !== peerId) {
                 safeSend(otherPeer.socket, {
                   type: "producer",
-                  data: { 
+                  data: {
                     producerId: producer.id,
-                    senderPeerId: peerId // NEW
-                  }
+                    senderPeerId: peerId,
+                    kind: producer.kind,
+                    userId: peer.userId,
+                  },
                 });
               }
             });
@@ -612,73 +545,21 @@ async function startServer() {
             });
           } catch (e) {
             console.error("producer error", e);
->>>>>>> Stashed changes
           }
-
-          safeSend(ws, { type: "produced", data: { producerId: producer.id } });
-
-          room.peers.forEach((p, id) => {
-            if (id === peerId) return;
-            safeSend(p.socket, {
-              type: "producer",
-              data: {
-                producerId: producer.id,
-                peerId: peerId!,
-                kind: producer.kind,
-                userId: peer.userId,
-              },
-            });
-          });
         }
 
         if (data.type === "consumer") {
-<<<<<<< Updated upstream
-=======
           const { producerId, kind, transportId, rtpCapabilities } = data;
->>>>>>> Stashed changes
           const room = rooms.get(roomId!);
           const peer = room?.peers.get(peerId!);
           if (!room || !peer) return;
 
-<<<<<<< Updated upstream
-          const transport = peer.transports.get(data.transportId);
-          if (!transport) return;
-
-          if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) return;
-
-          const consumer = await transport.consume({
-            producerId: data.producerId,
-            rtpCapabilities: data.rtpCapabilities,
-            paused: true,
-          });
-
-          peer.consumers.set(consumer.id, consumer);
-
-          safeSend(ws, {
-            type: "consumerCreated",
-            data: {
-              id: consumer.id,
-              producerId: data.producerId,
-              kind: consumer.kind,
-              rtpParameters: consumer.rtpParameters,
-            },
-          });
-        }
-
-        if (data.type === "resumeConsumer") {
-          const peer = rooms.get(roomId!)?.peers.get(peerId!);
-          const consumer = peer?.consumers.get(data.consumerId);
-          if (consumer) {
-            await consumer.resume();
-            console.log("Consumer resumed:", consumer.id);
-=======
           const transport = peer.transports.get(transportId);
           if (!transport) return;
 
           if (!room.router.canConsume({ producerId, rtpCapabilities })) {
             console.log("Router cannot consume");
             return;
->>>>>>> Stashed changes
           }
 
           try {
@@ -739,21 +620,10 @@ async function startServer() {
       const peer = room.peers.get(peerId);
       if (!peer) return;
 
-<<<<<<< Updated upstream
-      peer.transports.forEach((t: any) => t.close());
-      peer.producers.forEach((p: any) => {
-        room.peers.forEach((other) => {
-          safeSend(other.socket, { type: "producerClosed", producerId: p.id });
-        });
-        p.close();
-      });
-      peer.consumers.forEach((c: any) => c.close());
-=======
       // Clean up mediasoup resources
       peer.transports.forEach(t => t.close());
       peer.producers.forEach(p => p.close());
       peer.consumers.forEach(c => c.close());
->>>>>>> Stashed changes
 
       room.peers.delete(peerId);
       if (userId) await redis.srem(`meeting:${roomId}:participants`, userId);

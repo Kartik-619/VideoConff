@@ -40,8 +40,4 @@ export const createRouter = async () => {
   console.log("Router created:", router.id);
 
   return router;
-<<<<<<< Updated upstream
 };
-=======
-};
->>>>>>> Stashed changes

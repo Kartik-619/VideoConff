@@ -3,7 +3,7 @@
 
 import { useRef, useCallback } from "react"
 import { Device } from "mediasoup-client"
-import type { Transport, Producer, Consumer } from "mediasoup-client/lib/types"
+import type { Transport, Producer, Consumer } from "mediasoup-client/types"
 
 interface UseMediasoupConfig {
   wsRef: React.MutableRefObject<WebSocket | null>
@@ -21,7 +21,7 @@ export function useMediasoup(config: UseMediasoupConfig) {
   const createDevice = useCallback(async (rtpCapabilities: any) => {
     try {
       const device = new Device()
-      await device.load({ rtpCapabilities })
+      await device.load({ routerRtpCapabilities: rtpCapabilities })
       deviceRef.current = device
       console.log("Mediasoup Device loaded")
       return device
