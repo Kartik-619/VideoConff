@@ -22,6 +22,10 @@ import { redis } from "../lib/redis";
 
 import { Peer, Room } from "./types/types";
 
+import * as mediasoup from 'mediasoup';
+
+let webRtcServer: mediasoup.types.WebRtcServer;
+
 const app = express();
 
 // CORS configuration - allow frontend
@@ -93,12 +97,11 @@ async function getOrCreateRoom(roomId: string): Promise<Room> {
   console.log(`[room] Acquiring lock to create room ${roomId}`);
 
   const creationPromise = (async () => {
-    console.log(`[room][pid:${process.pid}] Creating router for room ${roomId}`);
     const router = await createRouter();
     const audioLevelObserver = await router.createAudioLevelObserver({
       maxEntries: 1,
       threshold: -80,
-      interval: 800,
+      interval: 800
     });
 
     const room: Room = { router, peers: new Map(), audioLevelObserver };
@@ -137,7 +140,6 @@ function scheduleRoomDeletion(roomId: string) {
     deletionTimers.delete(roomId);
     const latestRoom = rooms.get(roomId);
     if (latestRoom && latestRoom.peers.size === 0) {
-      latestRoom.audioLevelObserver.close();
       latestRoom.router.close();
       rooms.delete(roomId);
       console.log(`[room] Deleted room ${roomId} after idle timeout`);
@@ -185,8 +187,97 @@ function broadcastMeetingEnded(roomId: string) {
 
 /* ---------------- HTTP ---------------- */
 
-app.post("/endMeeting", (req, res) => {
-  broadcastMeetingEnded(req.body.meetingId);
+app.post("/leave", async (req, res) => {
+  const { meetingId, userId, token } = req.body;
+  if (!meetingId || !userId) {
+    return res.status(400).json({ error: "meetingId and userId required" });
+  }
+
+  if (token) {
+    try {
+      jwt.verify(token, process.env.NEXTAUTH_SECRET!);
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+  }
+
+  const room = rooms.get(meetingId);
+  if (room) {
+    const peersToRemove: string[] = [];
+    for (const [existingPeerId, peer] of room.peers.entries()) {
+      if (peer.userId === userId) {
+        peersToRemove.push(existingPeerId);
+      }
+    }
+
+    for (const existingPeerId of peersToRemove) {
+      const peer = room.peers.get(existingPeerId);
+      if (!peer) continue;
+      (peer.socket as WebSocket & { __replaced?: boolean }).__replaced = true;
+      peer.socket.close();
+      room.peers.delete(existingPeerId);
+
+      // Notify other peers about EACH removed peer connection
+      room.peers.forEach((otherPeer) => {
+        safeSend(otherPeer.socket, {
+          type: "peerLeft",
+          senderPeerId: existingPeerId,
+        });
+      });
+    }
+
+    if (peersToRemove.length > 0) {
+      await redis.srem(`meeting:${meetingId}:participants`, userId);
+      await broadcastLobby(meetingId);
+    }
+
+    if (room.peers.size === 0) {
+      scheduleRoomDeletion(meetingId);
+    }
+  }
+
+  res.json({ ok: true });
+});
+
+app.post("/endMeeting", async (req, res) => {
+  const { meetingId, token } = req.body;
+  if (!meetingId) {
+    return res.status(400).json({ error: "meetingId required" });
+  }
+
+  if (token) {
+    try {
+      jwt.verify(token, process.env.NEXTAUTH_SECRET!);
+    } catch {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+  }
+
+  const room = rooms.get(meetingId);
+  if (room) {
+    room.peers.forEach((peer) => {
+      safeSend(peer.socket, { type: "meetingEnded" });
+      (peer.socket as WebSocket & { __replaced?: boolean }).__replaced = true;
+      
+      // Clean up mediasoup resources
+      peer.transports.forEach(t => t.close());
+      peer.producers.forEach(p => p.close());
+      peer.consumers.forEach(c => c.close());
+
+      peer.socket.close();
+    });
+    room.router.close();
+    room.peers.clear();
+    rooms.delete(meetingId);
+    cancelDeletionTimer(meetingId);
+
+    try {
+      await redis.del(`meeting:${meetingId}:participants`);
+    } catch (err) {
+      console.error("Redis cleanup error for endMeeting:", err);
+    }
+  }
+
   res.json({ ok: true });
 });
 
@@ -206,7 +297,13 @@ app.post("/startMeeting", async (req, res) => {
 /* ---------------- SERVER ---------------- */
 
 async function startServer() {
-  const webRtcServer = await createWebRTCServer();
+  if (!process.env.NEXTAUTH_SECRET) {
+    console.error("FATAL: NEXTAUTH_SECRET is not set");
+    process.exit(1);
+  }
+
+  webRtcServer = await createWebRTCServer();
+
   const PORT = process.env.PORT || 8080;
   const server = app.listen(PORT, () => console.log(`WS Server running on ${PORT}`));
 
@@ -263,6 +360,12 @@ async function startServer() {
                 console.log(`[join] Replacing socket for user ${userId} in room ${roomId}`);
                 // Mark as replaced so ws.on("close") skips cleanup
                 (existingPeer.socket as any).__replaced = true;
+                
+                // Clean up mediasoup resources for the old peer
+                existingPeer.transports.forEach(t => t.close());
+                existingPeer.producers.forEach(p => p.close());
+                existingPeer.consumers.forEach(c => c.close());
+
                 existingPeer.socket.close();
                 room.peers.delete(existingPeerId);
               }
@@ -283,7 +386,14 @@ async function startServer() {
             // Cancel any pending deletion — room is active again
             cancelDeletionTimer(roomId!);
 
-            safeSend(ws, { type: "joined", peerId });
+            safeSend(ws, { type: "joined", peerId, hostId: room.peers.get(Array.from(room.peers.keys())[0])?.userId || null });
+            
+            // Send rtpCapabilities
+            safeSend(ws, {
+              type: "rtpCapabilities",
+              data: room.router.rtpCapabilities
+            });
+
             await broadcastLobby(roomId!);
 
             safeSend(ws, {
@@ -348,102 +458,147 @@ async function startServer() {
           room.peers.forEach((p: Peer) => safeSend(p.socket, messagePayload));
         }
 
-        /* ---------------- MEDIASOUP ACTIONS ---------------- */
+        /* ---------------- MEDIASOUP SIGNALING ---------------- */
+
         if (data.type === "createTransport") {
+          const { direction } = data;
           const room = rooms.get(roomId!);
           const peer = room?.peers.get(peerId!);
           if (!room || !peer) return;
 
-          const transport = await createTransport(room.router, webRtcServer);
-          peer.transports.set(transport.id, transport);
+          try {
+            const transport = await createTransport(room.router, webRtcServer);
+            if (!transport) return;
+            peer.transports.set(transport.id, transport);
 
-          safeSend(ws, {
-            type: "transportCreated",
-            data: {
-              direction: data.direction,
-              id: transport.id,
-              iceParameters: transport.iceParameters,
-              iceCandidates: transport.iceCandidates,
-              dtlsParameters: transport.dtlsParameters,
-            },
-          });
+            safeSend(ws, {
+              type: "transportCreated",
+              data: {
+                direction,
+                id: transport.id,
+                iceParameters: transport.iceParameters,
+                iceCandidates: transport.iceCandidates,
+                dtlsParameters: transport.dtlsParameters
+              }
+            });
+          } catch (error) {
+            console.error("createTransport error:", error);
+          }
         }
 
         if (data.type === "connectTransport") {
-          const transport = rooms.get(roomId!)?.peers.get(peerId!)?.transports.get(data.transportId);
-          if (transport) await transport.connect({ dtlsParameters: data.dtlsParameters });
+          const { transportId, dtlsParameters } = data;
+          const room = rooms.get(roomId!);
+          const peer = room?.peers.get(peerId!);
+          if (!room || !peer) return;
+
+          const transport = peer.transports.get(transportId);
+          if (!transport) return;
+
+          try {
+            await transport.connect({ dtlsParameters });
+            safeSend(ws, {
+              type: "transportConnected",
+              transportId: transportId
+            });
+          } catch (error) {
+            console.error("connectTransport error:", error);
+          }
         }
 
         if (data.type === "producer") {
+          const { transportId, kind, rtpParameters } = data;
           const room = rooms.get(roomId!);
           const peer = room?.peers.get(peerId!);
           if (!room || !peer) return;
 
-          const transport = peer.transports.get(data.transportId);
+          const transport = peer.transports.get(transportId);
           if (!transport) return;
 
-          const producer = await transport.produce({
-            kind: data.kind,
-            rtpParameters: data.rtpParameters,
-          });
+          try {
+            const producer = await transport.produce({ kind, rtpParameters });
+            peer.producers.set(producer.id, producer);
 
-          peer.producers.set(producer.id, producer);
-          if (producer.kind === "audio") {
-            room.audioLevelObserver.addProducer({ producerId: producer.id });
-          }
-
-          safeSend(ws, { type: "produced", data: { producerId: producer.id } });
-
-          room.peers.forEach((p, id) => {
-            if (id === peerId) return;
-            safeSend(p.socket, {
-              type: "producer",
-              data: {
-                producerId: producer.id,
-                peerId: peerId!,
-                kind: producer.kind,
-                userId: peer.userId,
-              },
+            safeSend(ws, {
+              type: "produced",
+              data: { producerId: producer.id }
             });
-          });
+
+            // Notify all other peers about the new producer
+            room.peers.forEach((otherPeer, otherPeerId) => {
+              if (otherPeerId !== peerId) {
+                safeSend(otherPeer.socket, {
+                  type: "producer",
+                  data: {
+                    producerId: producer.id,
+                    senderPeerId: peerId,
+                    kind: producer.kind,
+                    userId: peer.userId,
+                  },
+                });
+              }
+            });
+
+            producer.on("transportclose", () => {
+              producer.close();
+              safeSend(ws, { type: "producerclosed" });
+            });
+          } catch (e) {
+            console.error("producer error", e);
+          }
         }
 
         if (data.type === "consumer") {
+          const { producerId, kind, transportId, rtpCapabilities } = data;
           const room = rooms.get(roomId!);
           const peer = room?.peers.get(peerId!);
           if (!room || !peer) return;
 
-          const transport = peer.transports.get(data.transportId);
+          const transport = peer.transports.get(transportId);
           if (!transport) return;
 
-          if (!room.router.canConsume({ producerId: data.producerId, rtpCapabilities: data.rtpCapabilities })) return;
+          if (!room.router.canConsume({ producerId, rtpCapabilities })) {
+            console.log("Router cannot consume");
+            return;
+          }
 
-          const consumer = await transport.consume({
-            producerId: data.producerId,
-            rtpCapabilities: data.rtpCapabilities,
-            paused: true,
-          });
+          try {
+            const consumer = await transport.consume({
+              producerId,
+              rtpCapabilities,
+              paused: true
+            });
+            peer.consumers.set(consumer.id, consumer);
 
-          peer.consumers.set(consumer.id, consumer);
+            safeSend(ws, {
+              type: "consumerCreated",
+              data: {
+                id: consumer.id,
+                producerId,
+                kind: consumer.kind,
+                rtpParameters: consumer.rtpParameters
+              }
+            });
 
-          safeSend(ws, {
-            type: "consumerCreated",
-            data: {
-              id: consumer.id,
-              producerId: data.producerId,
-              kind: consumer.kind,
-              rtpParameters: consumer.rtpParameters,
-            },
-          });
+            consumer.on("producerclose", () => {
+              consumer.close();
+              safeSend(ws, { type: "consumerclosed" });
+            });
+          } catch (e) {
+            console.error("consumer error", e);
+          }
         }
 
         if (data.type === "resumeConsumer") {
-          const peer = rooms.get(roomId!)?.peers.get(peerId!);
-          const consumer = peer?.consumers.get(data.consumerId);
-          if (consumer) {
-            await consumer.resume();
-            console.log("Consumer resumed:", consumer.id);
-          }
+          const { consumerId } = data;
+          const room = rooms.get(roomId!);
+          const peer = room?.peers.get(peerId!);
+          if (!room || !peer) return;
+
+          const consumer = peer.consumers.get(consumerId);
+          if (!consumer) return;
+
+          await consumer.resume();
         }
       } catch (err) {
         console.error("WS Message Error:", err);
@@ -465,14 +620,10 @@ async function startServer() {
       const peer = room.peers.get(peerId);
       if (!peer) return;
 
-      peer.transports.forEach((t: any) => t.close());
-      peer.producers.forEach((p: any) => {
-        room.peers.forEach((other) => {
-          safeSend(other.socket, { type: "producerClosed", producerId: p.id });
-        });
-        p.close();
-      });
-      peer.consumers.forEach((c: any) => c.close());
+      // Clean up mediasoup resources
+      peer.transports.forEach(t => t.close());
+      peer.producers.forEach(p => p.close());
+      peer.consumers.forEach(c => c.close());
 
       room.peers.delete(peerId);
       if (userId) await redis.srem(`meeting:${roomId}:participants`, userId);

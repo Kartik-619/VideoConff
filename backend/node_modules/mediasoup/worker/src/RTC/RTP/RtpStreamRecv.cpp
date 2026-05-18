@@ -183,10 +183,11 @@ namespace RTC
 
 		RtpStreamRecv::RtpStreamRecv(
 		  RTP::RtpStreamRecv::Listener* listener,
+		  SharedInterface* shared,
 		  RTP::RtpStream::Params& params,
 		  uint32_t sendNackDelayMs,
 		  bool useRtpInactivityCheck)
-		  : RTP::RtpStream::RtpStream(listener, params, 10),
+		  : RTP::RtpStream::RtpStream(listener, shared, params, 10),
 		    sendNackDelayMs(sendNackDelayMs),
 		    useRtpInactivityCheck(useRtpInactivityCheck),
 		    transmissionCounter(
@@ -197,7 +198,7 @@ namespace RTC
 
 			if (this->params.useNack)
 			{
-				this->nackGenerator.reset(new RTC::NackGenerator(this, this->sendNackDelayMs));
+				this->nackGenerator.reset(new RTC::NackGenerator(this, this->shared, this->sendNackDelayMs));
 			}
 
 			this->inactive = false;
@@ -206,7 +207,7 @@ namespace RTC
 			{
 				// Run the RTP inactivity periodic timer (use a different timeout if DTX is
 				// enabled).
-				this->inactivityCheckPeriodicTimer = new TimerHandle(this);
+				this->inactivityCheckPeriodicTimer = this->shared->CreateTimer(this);
 
 				this->inactivityCheckPeriodicTimer->Start(
 				  this->params.useDtx ? InactivityCheckIntervalWithDtx : InactivityCheckInterval);
@@ -858,7 +859,7 @@ namespace RTC
 			// Nothing to do.
 		}
 
-		inline void RtpStreamRecv::OnTimer(TimerHandle* timer)
+		inline void RtpStreamRecv::OnTimer(TimerHandleInterface* timer)
 		{
 			MS_TRACE();
 

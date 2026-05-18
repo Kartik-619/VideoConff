@@ -2,6 +2,7 @@
 #define MS_RTC_SCTP_OPTIONS_HPP
 
 #include "common.hpp"
+#include "Utils.hpp"
 #include "RTC/Consts.hpp"
 #include "RTC/SCTP/packet/parameters/ZeroChecksumAcceptableParameter.hpp"
 
@@ -17,12 +18,12 @@ namespace RTC
 			/**
 			 * Signaled source port.
 			 */
-			uint16_t sourcePort{ 0 };
+			uint16_t sourcePort{ 5000 };
 
 			/**
 			 * Signaled destination port.
 			 */
-			uint16_t destinationPort{ 0 };
+			uint16_t destinationPort{ 5000 };
 
 			/**
 			 * Announced maximum number of outbound streams (OS).
@@ -30,7 +31,7 @@ namespace RTC
 			 * @remarks
 			 * - We use maximum value by default.
 			 */
-			uint16_t maxOutboundStreams{ 65535 };
+			uint16_t announcedMaxOutboundStreams{ 65535 };
 
 			/**
 			 * Announced maximum number of inbound streams (MIS).
@@ -38,13 +39,13 @@ namespace RTC
 			 * @remarks
 			 * - We use maximum value by default.
 			 */
-			uint16_t maxInboundStreams{ 65535 };
+			uint16_t announcedMaxInboundStreams{ 65535 };
 
 			/**
 			 * Maximum size of an SCTP Packet. It doesn't include any overhead of
 			 * DTLS, TURN, UDP or IP headers.
 			 */
-			size_t mtu{ RTC::Consts::MaxSafeMtuSizeForSctp };
+			size_t mtu{ Utils::Byte::PadDownTo4Bytes(RTC::Consts::MaxSafeMtuSizeForSctp) };
 
 			/**
 			 * The largest allowed message payload to be sent. Messages will be rejected

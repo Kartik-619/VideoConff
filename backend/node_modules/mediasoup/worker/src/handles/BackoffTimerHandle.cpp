@@ -8,17 +8,12 @@
 
 /* Instance methods. */
 
-BackoffTimerHandle::BackoffTimerHandle(
-  Listener* listener,
-  uint64_t baseTimeoutMs,
-  BackoffAlgorithm backoffAlgorithm,
-  std::optional<uint64_t> maxBackoffTimeoutMs,
-  std::optional<size_t> maxRestarts)
-  : listener(listener),
-    baseTimeoutMs(baseTimeoutMs),
-    backoffAlgorithm(backoffAlgorithm),
-    maxBackoffTimeoutMs(maxBackoffTimeoutMs),
-    maxRestarts(maxRestarts)
+BackoffTimerHandle::BackoffTimerHandle(const BackoffTimerHandleOptions& options)
+  : listener(options.listener),
+    baseTimeoutMs(options.baseTimeoutMs),
+    backoffAlgorithm(options.backoffAlgorithm),
+    maxBackoffTimeoutMs(options.maxBackoffTimeoutMs),
+    maxRestarts(options.maxRestarts)
 {
 	MS_TRACE();
 
@@ -60,12 +55,12 @@ void BackoffTimerHandle::SetBaseTimeoutMs(uint64_t baseTimeoutMs)
 {
 	MS_TRACE();
 
-	if (baseTimeoutMs > BackoffTimerHandle::MaxTimeoutMs)
+	if (baseTimeoutMs > BackoffTimerHandleInterface::MaxTimeoutMs)
 	{
 		MS_THROW_ERROR(
 		  "base timeout (%" PRIu64 " ms) cannot be greater than %" PRIu64 " ms",
 		  baseTimeoutMs,
-		  BackoffTimerHandle::MaxTimeoutMs);
+		  BackoffTimerHandleInterface::MaxTimeoutMs);
 	}
 
 	this->baseTimeoutMs = baseTimeoutMs;
@@ -88,7 +83,7 @@ uint64_t BackoffTimerHandle::ComputeNextTimeoutMs() const
 		{
 			auto timeoutMs = this->baseTimeoutMs;
 
-			while (expirationCount > 0 && timeoutMs < BackoffTimerHandle::MaxTimeoutMs)
+			while (expirationCount > 0 && timeoutMs < BackoffTimerHandleInterface::MaxTimeoutMs)
 			{
 				timeoutMs *= 2;
 				--expirationCount;
@@ -99,14 +94,14 @@ uint64_t BackoffTimerHandle::ComputeNextTimeoutMs() const
 				}
 			}
 
-			return std::min<uint64_t>(timeoutMs, BackoffTimerHandle::MaxTimeoutMs);
+			return std::min<uint64_t>(timeoutMs, BackoffTimerHandleInterface::MaxTimeoutMs);
 		}
 
 			NO_DEFAULT_GCC();
 	}
 }
 
-void BackoffTimerHandle::OnTimer(TimerHandle* timer)
+void BackoffTimerHandle::OnTimer(TimerHandleInterface* /*timer*/)
 {
 	MS_TRACE();
 

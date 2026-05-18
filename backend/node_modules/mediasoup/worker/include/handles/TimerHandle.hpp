@@ -2,40 +2,56 @@
 #define MS_TIMER_HANDLE_HPP
 
 #include "common.hpp"
+#include "handles/TimerHandleInterface.hpp"
 #include <uv.h>
 
-class TimerHandle
+// Forward declaration.
+class Shared;
+class BackoffTimerHandle;
+// TODO: Temporal until we have MockBackoffTimerHandle.
+namespace mocks
 {
-public:
-	class Listener
-	{
-	public:
-		virtual ~Listener() = default;
+	class MockShared;
+}
 
-	public:
-		virtual void OnTimer(TimerHandle* timer) = 0;
-	};
+class TimerHandle : public TimerHandleInterface
+{
+	// Only Shared and BackoffTimerHandle classes can invoke the constructor.
+	friend class Shared;
+	friend class BackoffTimerHandle;
+	// TODO: Temporal until we have MockBackoffTimerHandle.
+	friend class mocks::MockShared;
+
+private:
+	explicit TimerHandle(TimerHandleInterface::Listener* listener);
 
 public:
-	explicit TimerHandle(Listener* listener);
 	TimerHandle& operator=(const TimerHandle&) = delete;
-	TimerHandle(const TimerHandle&)            = delete;
-	~TimerHandle();
+
+	TimerHandle(const TimerHandle&) = delete;
+
+	~TimerHandle() override;
 
 public:
-	void Start(uint64_t timeout, uint64_t repeat = 0);
-	void Stop();
-	void Restart();
-	void Restart(uint64_t timeout, uint64_t repeat = 0);
-	uint64_t GetTimeout() const
+	void Start(uint64_t timeout, uint64_t repeat = 0) override;
+
+	void Stop() override;
+
+	void Restart() override;
+
+	void Restart(uint64_t timeout, uint64_t repeat = 0) override;
+
+	uint64_t GetTimeout() const override
 	{
 		return this->timeout;
 	}
-	uint64_t GetRepeat() const
+
+	uint64_t GetRepeat() const override
 	{
 		return this->repeat;
 	}
-	bool IsActive() const
+
+	bool IsActive() const override
 	{
 		return uv_is_active(reinterpret_cast<uv_handle_t*>(this->uvHandle)) != 0;
 	}
@@ -49,7 +65,7 @@ public:
 
 private:
 	// Passed by argument.
-	Listener* listener{ nullptr };
+	TimerHandleInterface::Listener* listener{ nullptr };
 	// Allocated by this.
 	uv_timer_t* uvHandle{ nullptr };
 	// Others.

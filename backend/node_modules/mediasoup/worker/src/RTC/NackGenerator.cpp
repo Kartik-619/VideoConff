@@ -17,10 +17,10 @@ namespace RTC
 
 	/* Instance methods. */
 
-	NackGenerator::NackGenerator(Listener* listener, unsigned int sendNackDelayMs)
+	NackGenerator::NackGenerator(Listener* listener, SharedInterface* shared, unsigned int sendNackDelayMs)
 	  : listener(listener),
 	    sendNackDelayMs(sendNackDelayMs),
-	    timer(new TimerHandle(this)),
+	    timer(shared->CreateTimer(this)),
 	    rtt(DefaultRtt)
 	{
 		MS_TRACE();
@@ -365,7 +365,7 @@ namespace RTC
 		}
 	}
 
-	inline void NackGenerator::OnTimer(TimerHandle* /*timer*/)
+	inline void NackGenerator::OnTimer(TimerHandleInterface* /*timer*/)
 	{
 		MS_TRACE();
 

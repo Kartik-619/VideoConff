@@ -24,11 +24,13 @@ namespace RTC
 
 	TransportCongestionControlClient::TransportCongestionControlClient(
 	  RTC::TransportCongestionControlClient::Listener* listener,
+	  SharedInterface* shared,
 	  RTC::BweType bweType,
 	  uint32_t initialAvailableBitrate,
 	  uint32_t maxOutgoingBitrate,
 	  uint32_t minOutgoingBitrate)
 	  : listener(listener),
+	    shared(shared),
 	    bweType(bweType),
 	    initialAvailableBitrate(
 	      std::max<uint32_t>(
@@ -75,7 +77,7 @@ namespace RTC
 		// videos are muted or using screensharing with still images)
 		this->rtpTransportControllerSend->EnablePeriodicAlrProbing(true);
 
-		this->processTimer = new TimerHandle(this);
+		this->processTimer = this->shared->CreateTimer(this);
 
 		this->processTimer->Start(
 		  std::min(
@@ -552,7 +554,7 @@ namespace RTC
 		return this->probationGenerator->GetNextPacket(size);
 	}
 
-	void TransportCongestionControlClient::OnTimer(TimerHandle* timer)
+	void TransportCongestionControlClient::OnTimer(TimerHandleInterface* timer)
 	{
 		MS_TRACE();
 
