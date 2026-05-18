@@ -56,6 +56,23 @@ export async function POST(req: Request) {
       );
     }
 
+    if (meeting.status === "CREATED") {
+
+      await prisma.meeting.update({
+        where: {
+          id: meeting.id,
+        },
+        data: {
+          status: "LIVE",
+        },
+      });
+    
+      await redis.set(
+        `meeting:${meeting.id}:status`,
+        "LIVE"
+      );
+    }
+
     // =========================
     //  REDIS DESIGN
     // =========================
