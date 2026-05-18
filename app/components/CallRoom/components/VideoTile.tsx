@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import UserAvatar from "./UserAvatar";
 
 interface Props {
   stream: MediaStream;
-  muted?: boolean;
   isVideoOff?: boolean;
   userName?: string;
   userImage?: string;
@@ -14,61 +13,89 @@ interface Props {
 
 export default function VideoTile({ 
   stream, 
-  muted, 
   isVideoOff = false, 
   userName, 
   userImage, 
   isLocal = false 
 }: Props) {
   const ref = useRef<HTMLVideoElement>(null);
+  const [hasVideoTrack, setHasVideoTrack] = useState(true);
 
   useEffect(() => {
-    if (ref.current) {
-        ref.current.srcObject = stream;
+    const video = ref.current;
+    if (!video) return;
 
-        ref.current.play().catch(() => {
-        console.log("Autoplay blocked");
-        });
+    video.srcObject = stream;
+
+    const checkVideo = () => {
+      const tracks = stream.getVideoTracks();
+      const hasTrack = tracks.length > 0 && tracks[0]!.enabled;
+      setHasVideoTrack(hasTrack);
+      if (hasTrack) {
+        video.play().catch(() => {});
+      }
+    };
+
+    checkVideo();
+    video.play().catch(() => {});
+
+    const tracks = stream.getTracks();
+    for (const track of tracks) {
+      track.addEventListener('ended', checkVideo);
+      track.addEventListener('mute', checkVideo);
+      track.addEventListener('unmute', checkVideo);
     }
-    }, [stream]);
+    stream.addEventListener('addtrack', checkVideo);
+    stream.addEventListener('removetrack', checkVideo);
+
+    return () => {
+      for (const track of tracks) {
+        track.removeEventListener('ended', checkVideo);
+        track.removeEventListener('mute', checkVideo);
+        track.removeEventListener('unmute', checkVideo);
+      }
+      stream.removeEventListener('addtrack', checkVideo);
+      stream.removeEventListener('removetrack', checkVideo);
+    };
+  }, [stream]);
+
+  const displayVideo = hasVideoTrack && !isVideoOff;
 
   return (
-    <div className="relative w-full h-full bg-black rounded-xl overflow-hidden">
-      {/* Video element - hidden when video is off */}
+    <div className="relative w-full h-full bg-gray-900 rounded-xl overflow-hidden">
       <video
         ref={ref}
         autoPlay
         playsInline
-        muted={muted}
+        muted={isLocal}
         style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          transform: isLocal ? "scaleX(-1)" : "none",
-          display: isVideoOff ? "none" : "block"
+          display: displayVideo ? 'block' : 'none',
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform: isLocal ? 'scaleX(-1)' : 'none',
         }}
-        className="w-full h-full object-cover"
       />
       
-      {/* Avatar shown when video is off */}
-      {isVideoOff && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-900 to-gray-800">
+      {!displayVideo && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-900/50 to-purple-900/50">
           <UserAvatar 
             userName={userName} 
             userImage={userImage}
             size="lg"
-            className="transform hover:scale-105 transition-transform duration-200"
           />
         </div>
       )}
-      
-      {/* Video off indicator */}
-      {isVideoOff && (
-        <div className="absolute top-3 left-3 bg-red-600 text-white px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1">
-          <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
+
+      {!displayVideo && (
+        <div className="absolute top-2 left-2 md:top-3 md:left-3 bg-red-500 text-white px-2 py-0.5 rounded-full text-[10px] md:text-xs font-semibold">
           Video Off
         </div>
       )}
+
+      <div className="absolute bottom-2 left-2 md:bottom-3 md:left-3 bg-black/70 backdrop-blur-sm text-white px-2 py-1 md:px-3 md:py-1.5 rounded-lg text-xs md:text-sm font-medium">
+        {userName || (isLocal ? 'You' : 'Participant')}
+      </div>
     </div>
   );
 }

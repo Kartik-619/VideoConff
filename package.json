@@ -22,8 +22,6 @@
     "ioredis": "^5.9.2",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.7.0",
-    "mediasoup": "^3.19.17",
-    "mediasoup-client": "^3.18.7",
     "next": "16.1.6",
     "next-auth": "^4.24.13",
     "prisma": "^5.22.0",
