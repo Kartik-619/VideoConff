@@ -25,25 +25,26 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen px-6 pt-32 pb-20">
 
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-4xl mx-auto">
 
         {/* Header */}
         <h1 className="text-4xl font-extrabold text-white tracking-tight mb-14">
           Account Overview
         </h1>
 
-        {/* Main Card */}
-        <div className="
-          bg-slate-900/30
-          backdrop-blur-2xl
-          border border-white/20
-          rounded-3xl
-          p-6
-          shadow-2xl
-        ">
+        {/* Profile Card */}
+        <div
+          className="
+            bg-slate-900/30
+            backdrop-blur-2xl
+            border border-white/20
+            rounded-3xl
+            p-8
+            shadow-2xl
+          "
+        >
 
-          {/* Top Section */}
-          <div className="flex flex-col md:flex-row items-center md:items-start gap-8">
+          <div className="flex flex-col md:flex-row items-center gap-8">
 
             {/* Avatar */}
             <div className="w-28 h-28 rounded-full overflow-hidden bg-gradient-to-r from-cyan-500 to-indigo-600 flex items-center justify-center text-4xl font-bold text-white shadow-xl">
@@ -55,13 +56,14 @@ export default function ProfilePage() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                session?.user?.name?.charAt(0)?.toUpperCase() || "U"
+                session?.user?.name?.charAt(0)?.toUpperCase() || 'U'
               )}
 
             </div>
 
-            {/* Info */}
+            {/* User Info */}
             <div className="text-center md:text-left">
+
               <h2 className="text-2xl font-semibold text-white">
                 {session?.user?.name}
               </h2>
@@ -73,6 +75,7 @@ export default function ProfilePage() {
               <span className="mt-4 inline-block px-4 py-1 text-sm rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
                 Active Member
               </span>
+
             </div>
 
           </div>
@@ -80,41 +83,30 @@ export default function ProfilePage() {
           {/* Divider */}
           <div className="mt-10 border-t border-white/20"></div>
 
-          {/* Stats Section */}
-          <div className="mt-10 grid md:grid-cols-3 gap-6 text-center">
+          {/* Account Details */}
+          <div className="mt-8 space-y-4 text-white/80">
 
-            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-              <p className="text-3xl font-bold text-white">0</p>
-              <p className="mt-2 text-white/70 text-sm">Meetings Hosted</p>
+            <div className="flex justify-between border-b border-white/10 pb-3">
+              <span>Authentication</span>
+              <span>Google OAuth</span>
             </div>
 
-            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-              <p className="text-3xl font-bold text-white">0</p>
-              <p className="mt-2 text-white/70 text-sm">Hours Recorded</p>
+            <div className="flex justify-between border-b border-white/10 pb-3">
+              <span>Account Status</span>
+              <span>Active</span>
             </div>
 
-            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-              <p className="text-3xl font-bold text-white">0</p>
-              <p className="mt-2 text-white/70 text-sm">Transcripts Generated</p>
+            <div className="flex justify-between pb-3">
+              <span>Platform</span>
+              <span>SPHINX Collaboration System</span>
             </div>
 
           </div>
 
-          {/* Action Buttons */}
-          <div className="mt-12 flex flex-col sm:flex-row gap-6 justify-center">
+          {/* Logout Button */}
+          <div className="mt-12 flex justify-center">
 
             <button
-              className="
-                px-8 py-3 rounded-full
-                border border-white/30
-                text-white font-semibold
-                hover:bg-white/10
-                transition-all duration-300
-              "
-            >
-              Edit Profile
-            </button>
-             <button
               onClick={() => signOut()}
               className="
                 px-8 py-3 rounded-full
