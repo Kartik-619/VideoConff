@@ -82,6 +82,7 @@ export default function Navbar() {
         {isLoggedIn && (
           <>
             <li onClick={() => router.push('/dashboard')} className={navItem('/dashboard')}>Dashboard</li>
+            <li onClick={() => router.push('/downloads')} className={navItem('/downloads')}>Downloads</li>
             <li onClick={() => router.push('/profile')} className={navItem('/profile')}>Profile</li>
           </>
         )}
@@ -124,6 +125,7 @@ export default function Navbar() {
               <li onClick={() => { router.push('/'); setIsMenuOpen(false); }} className="py-2 px-3 rounded-lg hover:bg-gray-100 cursor-pointer">Home</li>
               <li onClick={() => { router.push('/about'); setIsMenuOpen(false); }} className="py-2 px-3 rounded-lg hover:bg-gray-100 cursor-pointer">About Us</li>
               <li onClick={() => { router.push('/dashboard'); setIsMenuOpen(false); }} className="py-2 px-3 rounded-lg hover:bg-gray-100 cursor-pointer">Dashboard</li>
+              <li onClick={() => { router.push('/downloads'); setIsMenuOpen(false); }} className="py-2 px-3 rounded-lg hover:bg-gray-100 cursor-pointer">Downloads</li>
               <li onClick={() => { router.push('/profile'); setIsMenuOpen(false); }} className="py-2 px-3 rounded-lg hover:bg-gray-100 cursor-pointer">Profile</li>
             </ul>
 
