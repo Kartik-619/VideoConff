@@ -132,14 +132,16 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
         ...getTurnServers()
       ],
       iceCandidatePoolSize: 10,
-      iceTransportPolicy: 'all'
+      iceTransportPolicy: 'all',
+      bundlePolicy: 'max-bundle',
+      rtcpMuxPolicy: 'require'
     })
 
     peerConnectionsRef.current.set(peerId, pc)
     signalingStateRef.current.set(peerId, { makingOffer: false, ignoreOffer: false })
 
     pc.ontrack = (event) => {
-      console.log(`Peer ${peerId} received remote track:`, event.track, event.streams)
+      console.log(`Peer ${peerId} received remote track:`, event.track.kind, event.track.id)
       const streamFromEvent = event.streams?.[0]
       const stream = streamFromEvent ?? inboundStreamsRef.current.get(peerId) ?? new MediaStream()
       if (!inboundStreamsRef.current.has(peerId)) {
@@ -154,9 +156,8 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     }
 
     pc.onicecandidate = (event) => {
-      console.log(`Peer ${peerId} ICE candidate:`, event.candidate ? 'generated' : 'end of candidates')
       if (event.candidate && config.wsRef.current?.readyState === WebSocket.OPEN) {
-        console.log(`Peer ${peerId} sending ICE candidate:`, event.candidate)
+        console.debug(`Peer ${peerId} sending ICE candidate`)
         config.wsRef.current.send(JSON.stringify({
           type: "ice-candidate",
           candidate: event.candidate,
@@ -167,12 +168,15 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
 
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState
+      console.log(`Peer ${peerId} connection state: ${state}`)
       const timeouts = peerTimeoutsRef.current.get(peerId) || {}
 
       if (state === 'connecting') {
         if (timeouts.connecting) clearTimeout(timeouts.connecting)
         timeouts.connecting = setTimeout(() => {
           if (pc.connectionState === 'connecting') {
+            console.warn(`Peer ${peerId} connection stuck in 'connecting' for 8s, restarting ICE...`)
+            pc.restartIce()
             const sigState = getSignalingState(peerId)
             if (!sigState.makingOffer) {
               ;(async () => {
@@ -181,15 +185,15 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
                   const offer = await pc.createOffer()
                   await pc.setLocalDescription(offer)
                   await sendLocalDescription(peerId)
-                } catch {
-                  // error handled
+                } catch (err) {
+                  console.error(`Peer ${peerId} connection timeout re-offer error:`, err)
                 } finally {
                   sigState.makingOffer = false
                 }
               })()
             }
           }
-        }, 15000)
+        }, 8000)
         peerTimeoutsRef.current.set(peerId, timeouts)
       } else {
         if (timeouts.connecting) {
@@ -271,7 +275,23 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
         if (timeouts.checking) clearTimeout(timeouts.checking)
         timeouts.checking = setTimeout(() => {
           if (pc.iceConnectionState === 'checking') {
+            console.log(`Peer ${peerId} ICE checking timeout, restarting ICE...`)
             pc.restartIce()
+            const sigState = getSignalingState(peerId)
+            if (!sigState.makingOffer) {
+              ;(async () => {
+                try {
+                  sigState.makingOffer = true
+                  const offer = await pc.createOffer()
+                  await pc.setLocalDescription(offer)
+                  await sendLocalDescription(peerId)
+                } catch (err) {
+                  console.error(`Peer ${peerId} ICE restart offer error:`, err)
+                } finally {
+                  sigState.makingOffer = false
+                }
+              })()
+            }
           }
         }, 15000)
         peerTimeoutsRef.current.set(peerId, timeouts)
@@ -341,31 +361,9 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     const polite = myId < peerId
     console.log(`Peer ${peerId} setup - myId: ${myId}, polite: ${polite}, pc state: ${pc.signalingState}`)
 
-    if (!polite) {
-      console.log(`Peer ${peerId} is impolite (${myId} >= ${peerId}), waiting for offer from peer`)
-      return
-    }
-
-    try {
-      const sigState = getSignalingState(peerId)
-      if (sigState.makingOffer) {
-        console.log(`Peer ${peerId} already making offer, skipping`)
-        return
-      }
-
-      sigState.makingOffer = true
-      console.log(`Peer ${peerId} (polite) creating offer...`)
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      console.log(`Peer ${peerId} set local description (offer), state: ${pc.signalingState}`)
-      await sendLocalDescription(peerId)
-      console.log(`Peer ${peerId} offer sent`)
-    } catch (err) {
-      console.error(`Peer ${peerId} setup error:`, err)
-    } finally {
-      const sigState = getSignalingState(peerId)
-      sigState.makingOffer = false
-    }
+    // Perfect Negotiation: We rely on onnegotiationneeded to trigger the offer.
+    // If we are already in a negotiation, we don't need to do anything here.
+    // The createPeerConnection call above already added tracks, which triggers onnegotiationneeded.
   }, [])
 
   const handleOffer = useCallback(async (data: { senderPeerId: string; sdp: RTCSessionDescriptionInit }) => {
@@ -404,8 +402,8 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
     const sigState = getSignalingState(peerId)
     const polite = (config.socketIdRef.current || "") < peerId
 
-    const readyForOffer = !sigState.makingOffer
-    const offerCollision = readyForOffer === false
+    // Perfect Negotiation collision detection
+    const offerCollision = sigState.makingOffer || pc.signalingState !== "stable"
 
     sigState.ignoreOffer = !polite && offerCollision
     if (sigState.ignoreOffer) {
@@ -417,7 +415,6 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       if (offerCollision) {
         console.log(`Peer ${peerId} handling offer collision with rollback`)
         await pc.setLocalDescription({ type: "rollback" } as RTCSessionDescription)
-        sigState.makingOffer = false
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(data.sdp))
@@ -432,6 +429,8 @@ export function useWebRTC(config: UseWebRTCConfig): UseWebREReturn {
       console.log(`Peer ${peerId} sent answer`)
     } catch (err) {
       console.error(`Peer ${peerId} handle offer error:`, err)
+    } finally {
+      sigState.makingOffer = false
     }
   }, [])
 

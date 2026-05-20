@@ -43,8 +43,16 @@ export function useMedia(): UseMediaReturn {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: { echoCancellation: true, noiseSuppression: true }
+        video: {
+          width: { min: 640, ideal: 1280, max: 1920 },
+          height: { min: 360, ideal: 720, max: 1080 },
+          frameRate: { min: 15, ideal: 30, max: 60 }
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
       })
 
       localStreamRef.current = stream
