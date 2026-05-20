@@ -1,22 +1,32 @@
 import Redis from "ioredis";
 
-export const redis = new Redis(process.env.REDIS_URL!, {
-  maxRetriesPerRequest: null,
+declare global {
+  var redis: Redis | undefined;
+}
 
-  retryStrategy(times) {
-    return Math.min(times * 50, 2000);
-  }
-});
+const redisClient =
+  global.redis ??
+  new Redis(process.env.REDIS_URL!, {
+    maxRetriesPerRequest: null,
 
-// Logs for debugging
+    retryStrategy(times) {
+      return Math.min(times * 50, 2000);
+    },
+
+    tls: {},
+    enableReadyCheck: false,
+  });
+
+if (process.env.NODE_ENV !== "production") {
+  global.redis = redisClient;
+}
+
+export const redis = redisClient;
+
 redis.on("connect", () => {
   console.log("✅ Redis connected");
 });
 
 redis.on("error", (err) => {
-  console.error("❌ Redis error:", err);
-});
-
-redis.on("reconnecting", () => {
-  console.warn("⚠️ Redis reconnecting...");
+  console.error("❌ Redis error:", err.message);
 });
