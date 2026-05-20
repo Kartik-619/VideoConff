@@ -1,49 +1,33 @@
 import Redis from "ioredis";
 
-declare global {
-  var redis: Redis | undefined;
-}
+const globalForRedis = globalThis as unknown as {
+  redis: Redis | undefined;
+};
 
-const redisClient =
-  global.redis ??
+export const redis =
+  globalForRedis.redis ??
   new Redis(process.env.REDIS_URL!, {
+    tls: process.env.REDIS_URL?.startsWith("rediss://")
+      ? {}
+      : undefined,
+
     maxRetriesPerRequest: 3,
 
     retryStrategy(times) {
-      console.log(`Redis retry attempt ${times}`);
-
-      if (times > 20) {
-        return null;
-      }
-
-      return Math.min(times * 200, 5000);
-    },
-
-    reconnectOnError(err) {
-      const targetError = "READONLY";
-
-      if (err.message.includes(targetError)) {
-        return true;
-      }
-
-      return false;
+      console.log(`Redis retry ${times}`);
+      return Math.min(times * 200, 3000);
     },
 
     keepAlive: 30000,
 
     enableReadyCheck: true,
 
-    lazyConnect: true,
+    lazyConnect: false,
   });
 
 if (process.env.NODE_ENV !== "production") {
-  global.redis = redisClient;
+  globalForRedis.redis = redis;
 }
-
-export const redis = redisClient;
-
-// connect manually if lazyConnect=true
-redis.connect().catch(console.error);
 
 redis.on("connect", () => {
   console.log("✅ Redis connected");
@@ -57,10 +41,10 @@ redis.on("reconnecting", () => {
   console.log("⚠️ Redis reconnecting...");
 });
 
-redis.on("error", (err) => {
-  console.error("❌ Redis error:", err.message);
+redis.on("close", () => {
+  console.log("🔌 Redis closed");
 });
 
-redis.on("close", () => {
-  console.log("🔌 Redis connection closed");
+redis.on("error", (err) => {
+  console.error("❌ Redis error:", err.message);
 });
