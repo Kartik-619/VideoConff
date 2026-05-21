@@ -50,7 +50,7 @@ export default function HeroLanding() {
         </h1>
 
         <p className="mt-6 text-lg md:text-xl text-white/85 leading-relaxed">
-          Real-time meetings with intelligent transcripts and structured documentation.
+          Real-time meetings with SPHINX.
         </p>
 
         <div className="
