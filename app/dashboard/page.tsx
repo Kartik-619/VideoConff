@@ -9,18 +9,6 @@ type Meeting = {
   meetingCode: string;
   status: string;
   createdAt: string;
-  endedAt?: string;
-
-  host: {
-    name: string;
-    email: string;
-  };
-
-  participants: {
-    role: 'HOST' | 'PARTICIPANT';
-    joinedAt: string;
-    leftAt?: string;
-  }[];
 };
 
 export default function DashboardPage() {
@@ -148,82 +136,50 @@ export default function DashboardPage() {
 
             {meetings.map((meeting) => (
 
-<div
-key={meeting.id}
-className="
-  bg-slate-900/40
-  border border-white/20
-  rounded-2xl
-  p-6
-  text-white
-  flex flex-col md:flex-row
-  md:items-center
-  md:justify-between
-  gap-6
-"
->
+              <div
+                key={meeting.id}
+                className="
+                  bg-slate-900/40
+                  border border-white/20
+                  rounded-xl
+                  p-6
+                  flex justify-between items-center
+                  text-white
+                "
+              >
 
-<div>
+                <div>
 
-  <div className="flex items-center gap-3 flex-wrap">
+                  <p className="text-lg font-semibold">
+                    {meeting.meetingCode}
+                  </p>
 
-    <p className="text-lg font-semibold">
-      {meeting.meetingCode}
-    </p>
+                  <p className="text-sm text-white/60">
+                    {new Date(meeting.createdAt).toLocaleString()}
+                  </p>
 
-    <span className="
-      text-xs px-3 py-1 rounded-full
-      bg-indigo-500/20 text-indigo-300
-    ">
-      {meeting.participants[0]?.role}
-    </span>
+                </div>
 
-    <span className="
-      text-xs px-3 py-1 rounded-full
-      bg-cyan-500/20 text-cyan-300
-    ">
-      {meeting.status}
-    </span>
+                <div className="flex gap-4 items-center">
 
-  </div>
+                  <span className="text-sm px-3 py-1 rounded-full bg-cyan-500/20 text-cyan-300">
+                    {meeting.status}
+                  </span>
 
-  <p className="mt-3 text-sm text-white/70">
-    Host: {meeting.host.name}
-  </p>
+                  <button
+                    onClick={() => router.push(`/meeting/${meeting.id}`)}
+                    className="text-sm underline"
+                  >
+                    Open
+                  </button>
 
-  <p className="text-sm text-white/60 mt-1">
-    Created: {new Date(meeting.createdAt).toLocaleString()}
-  </p>
+                </div>
 
-  {meeting.endedAt && (
-    <p className="text-sm text-white/60 mt-1">
-      Ended: {new Date(meeting.endedAt).toLocaleString()}
-    </p>
-  )}
-
-</div>
-
-<button
-  onClick={() => router.push(`/meeting/${meeting.meetingCode}`)}
-  className="
-    px-6 py-2 rounded-full
-    bg-gradient-to-r from-cyan-500 to-indigo-600
-    text-white font-medium
-    hover:scale-105
-    transition-all duration-300
-    self-start md:self-center
-  "
->
-  Open Meeting
-</button>
-
-</div>
-
+              </div>
 
             ))}
 
           </div>
-          
 
         )}
 
