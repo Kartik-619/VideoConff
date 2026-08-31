@@ -3,8 +3,10 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  connection_limit = 10
+  pool_timeout  = 10
 }
 
 enum MeetingStatus {
@@ -29,6 +31,7 @@ model User {
 
   meetings     Meeting[]
   participants MeetingParticipant[]
+  messages     ChatMessage[]
 }
 
 model Meeting {
@@ -40,9 +43,11 @@ model Meeting {
   endedAt     DateTime?
 
   host         User                 @relation(fields: [hostId], references: [id])
-  participants MeetingParticipant[] 
+  participants MeetingParticipant[]
+  messages     ChatMessage[]
 
   @@index([hostId])
+  @@index([status])
 }
 
 model MeetingParticipant {
@@ -58,4 +63,20 @@ model MeetingParticipant {
 
   @@unique([meetingId, userId], name: "meetingId_userId")
   @@index([meetingId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id           String   @id @default(uuid())
+  roomId       String
+  userId       String
+  name         String
+  message      String
+  fileMetadata Json?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([roomId, createdAt])
+  @@index([userId])
 }
