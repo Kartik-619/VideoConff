@@ -27,9 +27,7 @@ export default function MeetingRoom() {
   const [chatOpen, setChatOpen] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState("Connecting...")
   const [participantCount, setParticipantCount] = useState(0)
-  const [debugOpen, setDebugOpen] = useState(false)
   const [remotePeerCount, setRemotePeerCount] = useState(0)
-  const [peerConnectionStates, setPeerConnectionStates] = useState<Map<string, string>>(new Map())
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
   const meetingEndedRef = useRef(false)
@@ -212,18 +210,8 @@ export default function MeetingRoom() {
 
   useEffect(() => {
     setRemotePeerCount(remoteStreams.size)
-    const states = new Map<string, string>()
-    webrtc.peerConnectionsRef.current.forEach((pc, id) => {
-      states.set(id, pc.connectionState)
-    })
-    setPeerConnectionStates(states)
 
     const interval = setInterval(() => {
-      const fresh = new Map<string, string>()
-      webrtc.peerConnectionsRef.current.forEach((pc, id) => {
-        fresh.set(id, pc.connectionState)
-      })
-      setPeerConnectionStates(fresh)
       setRemotePeerCount(remoteStreams.size)
     }, 2000)
 
@@ -316,55 +304,6 @@ export default function MeetingRoom() {
         socketId={socketIdRef.current}
         cameraOff={media.cameraOff}
       />
-
-      <button
-        onClick={() => setDebugOpen(!debugOpen)}
-        className="fixed top-16 right-4 z-50 bg-yellow-600 text-white px-3 py-1 rounded-md text-xs font-bold hover:bg-yellow-500"
-      >
-        {debugOpen ? 'HIDE DEBUG' : 'DEBUG'}
-      </button>
-
-      {debugOpen && (
-        <div className="fixed top-16 left-4 z-50 bg-gray-900/95 border border-yellow-500 text-green-400 p-4 rounded-lg text-xs font-mono space-y-1 max-w-sm shadow-2xl">
-          <div className="text-yellow-400 font-bold text-sm mb-2 border-b border-yellow-500/50 pb-1">CONNECTION STATUS</div>
-          <div>WS Status: <span className={connectionStatus === 'Connected' ? 'text-green-400' : 'text-red-400'}>{connectionStatus}</span></div>
-          <div>My Peer ID: <span className="text-white">{socketIdRef.current || 'not set'}</span></div>
-          <div>Local Stream: <span className={media.localStream ? 'text-green-400' : 'text-red-400'}>{media.localStream ? 'ready' : 'not ready'}</span></div>
-          <div>Local Video Ready: <span className={media.localStreamReady.current ? 'text-green-400' : 'text-red-400'}>{media.localStreamReady.current ? 'yes' : 'no'}</span></div>
-          <div>Camera: <span className={media.cameraOff ? 'text-red-400' : 'text-green-400'}>{media.cameraOff ? 'OFF' : 'ON'}</span></div>
-          <div className="border-t border-yellow-500/50 pt-1 mt-1">
-            Remote Participants: <span className="text-white">{remoteParticipants.size}</span>
-          </div>
-          <div>
-            {Array.from(remoteParticipants.entries()).map(([id, p]) => (
-              <div key={id} className="ml-2 text-cyan-400">- {p.name} ({id.slice(0,8)}...)</div>
-            ))}
-          </div>
-          <div className="border-t border-yellow-500/50 pt-1 mt-1">
-            Remote Streams: <span className="text-white">{remoteStreams.size}</span>
-          </div>
-          <div>
-            {Array.from(remoteStreams.keys()).map(id => (
-              <div key={id} className="ml-2 text-green-400">- stream from {id.slice(0,8)}...</div>
-            ))}
-          </div>
-          <div className="border-t border-yellow-500/50 pt-1 mt-1">
-            Peer Connections: <span className="text-white">{webrtc.peerConnectionsRef.current.size}</span>
-          </div>
-          <div>
-            {Array.from(peerConnectionStates.entries()).map(([id, state]) => (
-              <div key={id} className={`ml-2 ${state === 'connected' ? 'text-green-400' : state === 'connecting' ? 'text-yellow-400' : 'text-red-400'}`}>
-                - {id.slice(0,8)}...: {state}
-              </div>
-            ))}
-          </div>
-          {remoteStreams.size === 0 && remoteParticipants.size > 0 && (
-            <div className="border-t border-yellow-500/50 pt-1 mt-1 text-red-400">
-              Participants connected but no streams received. Check WebRTC signaling.
-            </div>
-          )}
-        </div>
-      )}
 
       {chatOpen && (
         <ChatPanel
