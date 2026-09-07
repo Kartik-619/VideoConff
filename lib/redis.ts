@@ -4,9 +4,8 @@ const globalForRedis = globalThis as unknown as {
   redis: Redis | undefined;
 };
 
-export const redis =
-  globalForRedis.redis ??
-  new Redis(process.env.REDIS_URL!, {
+function createRedisClient(): Redis {
+  const client = new Redis(process.env.REDIS_URL!, {
     tls: process.env.REDIS_URL?.startsWith("rediss://")
       ? {}
       : undefined,
@@ -14,7 +13,7 @@ export const redis =
     maxRetriesPerRequest: 3,
 
     retryStrategy(times) {
-      console.log(`Redis retry ${times}`);
+      if (times > 10) return null;
       return Math.min(times * 200, 3000);
     },
 
@@ -22,29 +21,59 @@ export const redis =
 
     enableReadyCheck: true,
 
-    lazyConnect: false,
+    lazyConnect: true,
+
+    connectTimeout: 5000,
+
+    commandTimeout: 3000,
   });
+
+  client.on("connect", () => {
+    console.log("✅ Redis connected");
+  });
+
+  client.on("ready", () => {
+    console.log("🚀 Redis ready");
+  });
+
+  client.on("reconnecting", () => {
+    console.log("⚠️ Redis reconnecting...");
+  });
+
+  client.on("close", () => {
+    console.log("🔌 Redis closed");
+  });
+
+  client.on("error", (err) => {
+    console.error("❌ Redis error:", err.message);
+  });
+
+  return client;
+}
+
+export const redis = globalForRedis.redis ?? createRedisClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForRedis.redis = redis;
 }
 
-redis.on("connect", () => {
-  console.log("✅ Redis connected");
-});
+let _connected = false;
 
-redis.on("ready", () => {
-  console.log("🚀 Redis ready");
-});
+async function ensureConnected(): Promise<void> {
+  if (_connected && redis.status === "ready") return;
+  await redis.connect();
+  _connected = true;
+}
 
-redis.on("reconnecting", () => {
-  console.log("⚠️ Redis reconnecting...");
-});
-
-redis.on("close", () => {
-  console.log("🔌 Redis closed");
-});
-
-redis.on("error", (err) => {
-  console.error("❌ Redis error:", err.message);
-});
+export async function safeRedis<T>(
+  fn: (r: Redis) => Promise<T>,
+  fallback: T
+): Promise<T> {
+  try {
+    await ensureConnected();
+    return await fn(redis);
+  } catch (err) {
+    console.error("⚠️ Redis operation failed, using fallback:", (err as Error).message);
+    return fallback;
+  }
+}

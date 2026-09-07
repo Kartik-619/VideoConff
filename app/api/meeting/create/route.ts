@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { redis } from "@/lib/redis";
+import { safeRedis } from "@/lib/redis";
 
 //  Generate meeting code
 function generateMeetingCode() {
@@ -73,15 +73,14 @@ export async function POST() {
     const hostKey = `meeting:${meeting.id}:host`;
     const statusKey = `meeting:${meeting.id}:status`;
 
-    // ✅ Set Redis state
-    await redis.set(hostKey, userId);
-    await redis.set(statusKey, "CREATED");
-    await redis.sadd(participantsKey, userId);
-
-    // TTL 
-    await redis.expire(participantsKey, 86400);
-    await redis.expire(hostKey, 86400);
-    await redis.expire(statusKey, 86400);
+    await safeRedis(async (r) => {
+      await r.set(hostKey, userId);
+      await r.set(statusKey, "CREATED");
+      await r.sadd(participantsKey, userId);
+      await r.expire(participantsKey, 86400);
+      await r.expire(hostKey, 86400);
+      await r.expire(statusKey, 86400);
+    }, null);
 
     return NextResponse.json({
       meetingId: meeting.id,
